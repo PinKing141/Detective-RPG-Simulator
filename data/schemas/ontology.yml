@@ -1,0 +1,8 @@
+roles:
+  - victim
+  - suspect
+  - witness
+evidence_types:
+  - physical
+  - testimonial
+  - digital

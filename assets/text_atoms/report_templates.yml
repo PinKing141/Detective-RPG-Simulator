@@ -1,0 +1,2 @@
+templates:
+  - "Time: {time}. Location: {location}. Notes: {notes}."
