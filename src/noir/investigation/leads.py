@@ -27,9 +27,9 @@ class Lead:
 
 
 LEAD_DEADLINES = {
-    EvidenceType.TESTIMONIAL: 3,
-    EvidenceType.CCTV: 4,
-    EvidenceType.FORENSICS: 5,
+    EvidenceType.TESTIMONIAL: 2,
+    EvidenceType.CCTV: 3,
+    EvidenceType.FORENSICS: 4,
 }
 
 LEAD_LABELS = {
