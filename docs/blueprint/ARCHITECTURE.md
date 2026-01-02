@@ -24,6 +24,59 @@ Flow:
 4) Investigation actions apply costs and update TruthState through the simulator.
 5) Narrative formats results; it does not decide results.
 
+## Case generation layers
+- Layer 1: Case skeleton (always present).
+  - Who, victim, offender.
+  - Where and when.
+  - Method and access path.
+  - Motive category.
+  - 2-3 key timeline events.
+- Layer 2: Modulators (small set per case).
+  - Only traits that change decisions, evidence, or interpretation.
+  - Phase 0 modulators: competence, risk_tolerance, relationship_distance.
+- Layer 3: Color (late-bound).
+  - Used for prose texture only unless promoted by a later phase.
+  - Generated at write-time, not simulated deep.
+
+## Truth graph topology
+- Use a temporal MultiDiGraph for the canonical truth layer.
+- Nodes: people, locations, items, events.
+- Edge categories:
+  - state relationship: start_time, end_time
+  - transient action: timestamp, duration
+  - spatial position: entry_time, exit_time
+  - causal link: precondition_id
+- Time is first-class. Queries slice windows for alibis and causality.
+
+## Noisy channel projection
+- Presentation is a projection of Truth through bounded noise.
+- Erosion types:
+  - temporal fuzzing (memory decay)
+  - informational omission (missed or decayed evidence)
+  - deception (explicit false edges)
+- Deception is explicit. It never rewrites Truth.
+
+## Nemesis mechanics
+- Signature is a fixed post-processing ritual applied to crimes.
+- MO is adaptive weighting, not opaque ML.
+- Proficiency increases with use and reduces execution noise.
+- Compromised methods reduce weight and push exploration.
+
+## Showrunner archetypes
+- Pressure: resource attrition with short timers and high visibility.
+- Pattern: copy Nemesis MO without signature to create false positives.
+- Character: center on high-affinity NPCs for narrative depth.
+- Foreshadowing: failed or non-lethal events that hint at new MO.
+
+## Deduction validation
+- Player builds a hypothesis graph from evidence.
+- Validation uses ontology mapping and soft matching for partial credit.
+  - Example: STABBED matches ATTACKED_WITH_SHARP_OBJECT.
+
+## UI presentation (Textual)
+- Dashboard layout: header, map, board, wire.
+- Rich renders artifacts (autopsy, case files, reports) as panels and tables.
+
 ## Module boundaries
 - domain: data models, enums, ontology, and invariants.
 - truth: graph wrapper, simulator, queries, exporters.

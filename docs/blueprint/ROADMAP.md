@@ -11,20 +11,26 @@ Scope
 - Domain models and invariants.
 - Truth graph wrapper and queries.
 - Case truth generator (one homicide archetype).
+- Case skeleton with active modulators (competence, risk_tolerance, relationship_distance).
 - Presentation projector with bounded noise.
 - Investigation actions and costs.
 - Deduction board and arrest thresholds.
 - Debug tools (truth dump).
+- Content atom proofs (witness lines, profiling blurbs, recap stings).
 
 Deliverables
 - config.py with seed and debug flags.
 - util/rng.py with a single RNG source.
 - TruthState wrapper and query helpers.
 - Case generator that produces a coherent timeline.
+- Modulator-aware generator that changes evidence footprint.
 - Projector that produces evidence with explainable uncertainty.
-- Five investigation actions with time and heat costs.
-- Text-only deduction board and validation rules.
+- Five investigation actions with time and heat costs:
+  - visit_scene, interview, request_cctv, submit_forensics, arrest.
+- Text-only deduction board and validation rules with outcome summary.
+- Explicit set_hypothesis step (suspect, method, time bucket, evidence) required before arrest.
 - Dump script that prints truth, timeline, and alibis.
+- Content atom pack that demonstrates scalable text variety.
 
 Exit proof
 - Same seed produces identical truth and evidence.
@@ -37,11 +43,42 @@ Checklist
 - [ ] TruthState supports add_person, add_location, record_event, and possession.
 - [ ] Queries can answer alibi-style questions consistently.
 - [ ] Evidence items include source, time collected, and confidence band.
+- [ ] Case modulators are limited to three drivers in Phase 0.
 - [ ] Investigation actions apply time and heat costs.
 - [ ] Arrest validation returns a legible explanation.
+- [ ] Hypothesis submission is explicit and required before arrest.
 - [ ] Truth dump exists and reproduces by seed.
+- [ ] Content atom proof exists (50 witness lines, 30 profiling lines, 20 recap stings).
 
 Stop condition: If all boxes are ticked, Phase 0 is complete even if UI and prose are ugly.
+
+## Phase 0 closure confirmation
+Phase 0 design question:
+"Is the game fair, legible, and playable as a reasoning loop?"
+
+Phase 0 is complete when:
+- Determinism holds (same seed yields same truth and evidence).
+- Truth exists independently, presentation is derived and explainable.
+- Actions consume time and heat, forcing tradeoffs.
+- Player commits a hypothesis (suspect, method or unknown, time window, evidence).
+- Hypothesis is visible at all times and arrest validates it.
+- Outcomes explain support and missing elements in-world.
+- Players can revise, gamble, be wrong, and continue.
+
+Phase 0 hard stop rule:
+- If the next change improves internal elegance but not player decisions, stop.
+
+Do not add after Phase 0:
+- New mechanics (motives, profiling synthesis, playstyle traits, nemesis reactions, memory across cases, relationship systems).
+- UI expansion (murder board, visual graphs, maps, multi-panel dashboards).
+- Extra evidence types, realism passes, or tuning for feel.
+
+Phase 0.5 - Textual wrapper (presentation only)
+- Single screen only. Use a scrollable log and a scrollable detail pane.
+- UI reads state and dispatches actions. No logic in widgets.
+- Any text that can exceed 5 lines must be scrollable.
+- CLI loop must remain playable if Textual breaks.
+- Stop when a player can finish a case comfortably for an hour.
 
 ## Phase 1 - Vertical Slice
 Phase question: Is the core loop fun, fair, and legible?

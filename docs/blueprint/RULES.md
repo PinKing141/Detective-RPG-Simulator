@@ -29,12 +29,35 @@ This is the design contract. If a feature conflicts with these rules, the featur
 - Hard fail states that force reloads.
 - Letting optimization erase role-play.
 
+## Guardrails (avoid overreach)
+- Use graphs for causality, timelines, and alibi checks only. Do not query them for every micro decision.
+- Nemesis adaptation is heuristic weighting. Avoid opaque ML or heavy tuning.
+- Showrunner selects which truths surface; it never invents urgent truths that do not exist.
+- Profiling reframes; it never resolves or introduces facts.
+- Lies are explicit false edges, never silent rewrites.
+- Scale only after content atom proofs (witness lines, profiling paragraphs, recap stings).
+- Religion, intelligence, and personality are color unless promoted to an active modulator.
+- Intelligence is domain competence, not a generic IQ slider.
+
 ## Decision and trade-off rules
 - Decision gate: you can name the player decision in one sentence.
 - Trade-off gate: every use has a cost or locks out alternatives.
 - Anti-optimization: no action is always correct; costs and uncertainty must limit it.
 - Legibility: outcomes are explainable in-world.
 - Failure creates new play, not a dead end.
+
+## Nuance gating
+Only simulate nuance if it changes at least one:
+- Offender decisions.
+- Evidence footprint.
+- Investigation choices.
+- Interpretation (plausible alternatives).
+
+If it does not change any of those, it is flavor and must be generated cheaply.
+
+## Trait activation limits
+- Never let more than 4 traits drive mechanics in a single case.
+- Everything else is late-bound color or future-phase material.
 
 ## Feature kill criteria (mid-phase)
 Gate A - Decision gate (mandatory)
