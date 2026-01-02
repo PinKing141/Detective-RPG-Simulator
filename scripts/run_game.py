@@ -22,6 +22,7 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
+from noir.investigation.outcomes import TRUST_LIMIT, apply_case_outcome, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import WitnessStatement
 from noir.presentation.projector import project_case
@@ -170,24 +171,43 @@ def _choose_evidence(truth, presentation, known_ids: list) -> list:
     return selected
 
 
+def _start_case(
+    base_rng: Rng,
+    seed: int,
+    case_index: int,
+    state: InvestigationState | None,
+    case_id_override: str | None = None,
+):
+    case_rng = base_rng.fork(f"case-{case_index}")
+    case_id = case_id_override or f"case_{seed}_{case_index}"
+    truth, case_facts = generate_case(case_rng, case_id=case_id)
+    presentation = project_case(truth, case_rng.fork("projection"))
+    next_state = state or InvestigationState()
+    next_state = InvestigationState(
+        pressure=next_state.pressure,
+        trust=next_state.trust,
+    )
+    board = DeductionBoard()
+    location_id = case_facts["crime_scene_id"]
+    item_id = case_facts["weapon_id"]
+    return truth, presentation, next_state, board, location_id, item_id
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Phase 0 playable loop.")
     parser.add_argument("--seed", type=int, default=config.SEED)
     parser.add_argument("--case-id", type=str, default=None)
     args = parser.parse_args()
 
-    rng = Rng(args.seed)
-    truth, case_facts = generate_case(rng, case_id=args.case_id)
-    presentation = project_case(truth, rng.fork("projection"))
-    state = InvestigationState()
-    board = DeductionBoard()
-
-    location_id = case_facts["crime_scene_id"]
-    item_id = case_facts["weapon_id"]
+    base_rng = Rng(args.seed)
+    case_index = 1
+    truth, presentation, state, board, location_id, item_id = _start_case(
+        base_rng, args.seed, case_index, None, case_id_override=args.case_id
+    )
 
     print(
         f"Case {truth.case_id} started. Investigation time limit {TIME_LIMIT}, "
-        f"pressure tolerance {PRESSURE_LIMIT}."
+        f"pressure tolerance {PRESSURE_LIMIT}, trust {state.trust}/{TRUST_LIMIT}."
     )
     print("Type a number to choose an action. Type 'q' to quit.")
 
@@ -195,7 +215,8 @@ def main() -> None:
         print("")
         print(
             f"Investigation Time: {state.time}/{TIME_LIMIT} | "
-            f"Pressure: {state.pressure}/{PRESSURE_LIMIT}"
+            f"Pressure: {state.pressure}/{PRESSURE_LIMIT} | "
+            f"Trust: {state.trust}/{TRUST_LIMIT}"
         )
         print(_hypothesis_line(board, truth))
         supports_line = _supports_line(board, presentation)
@@ -303,9 +324,20 @@ def main() -> None:
                 print("Notes:")
                 for line in validation.notes:
                     print(f"- {line}")
-            if validation.is_correct_suspect and validation.probable_cause:
-                print("Case concluded.")
-                break
+            outcome = resolve_case_outcome(validation)
+            print(f"Case outcome: {outcome.arrest_result}.")
+            for note in outcome.notes:
+                print(f"- {note}")
+            state = apply_case_outcome(state, outcome)
+            case_index += 1
+            truth, presentation, state, board, location_id, item_id = _start_case(
+                base_rng, args.seed, case_index, state
+            )
+            print(
+                f"New case {truth.case_id} started. "
+                f"Pressure {state.pressure}/{PRESSURE_LIMIT}, "
+                f"Trust {state.trust}/{TRUST_LIMIT}."
+            )
 
 
 if __name__ == "__main__":

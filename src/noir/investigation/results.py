@@ -20,6 +20,7 @@ class ActionOutcome(StrEnum):
 class InvestigationState:
     time: int = 0
     pressure: int = 0
+    trust: int = 3
     cooperation: float = 1.0
     knowledge: KnowledgeState = field(default_factory=KnowledgeState)
 

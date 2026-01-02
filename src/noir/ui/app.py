@@ -21,6 +21,7 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
+from noir.investigation.outcomes import TRUST_LIMIT, apply_case_outcome, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import CCTVReport, ForensicsResult, WitnessStatement
 from noir.presentation.projector import project_case
@@ -77,17 +78,16 @@ class Phase05App(App):
         super().__init__()
         self.seed = seed if seed is not None else config.SEED
         self.case_id = case_id
-        self.rng = Rng(self.seed)
-        self.truth, self.case_facts = generate_case(self.rng, case_id=self.case_id)
-        self.presentation = project_case(self.truth, self.rng.fork("projection"))
-        self.state = InvestigationState()
+        self.base_rng = Rng(self.seed)
+        self.case_index = 1
+        self.case_history = []
+        self.state: InvestigationState | None = None
         self.board = DeductionBoard()
         self.prompt_state: PromptState | None = None
         self.selected_evidence_id = None
         self.last_result = None
 
-        self.location_id = self.case_facts["crime_scene_id"]
-        self.item_id = self.case_facts["weapon_id"]
+        self._start_case(self.case_index, case_id_override=self.case_id)
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -146,7 +146,8 @@ class Phase05App(App):
         header = self.query_one("#header", Static)
         time_line = (
             f"Case: {self.truth.case_id}  Investigation Time {self.state.time}/{TIME_LIMIT}  "
-            f"Pressure {self.state.pressure}/{PRESSURE_LIMIT}"
+            f"Pressure {self.state.pressure}/{PRESSURE_LIMIT}  "
+            f"Trust {self.state.trust}/{TRUST_LIMIT}"
         )
         hypothesis_line = self._hypothesis_line()
         supports_line = self._supports_line()
@@ -388,9 +389,34 @@ class Phase05App(App):
             self._write("Notes:")
             for line in validation.notes:
                 self._write(f"- {line}")
+        outcome = resolve_case_outcome(validation)
+        self._write(f"Case outcome: {outcome.arrest_result}.")
+        for note in outcome.notes:
+            self._write(f"- {note}")
+        self.case_history.append(outcome)
+        self.state = apply_case_outcome(self.state, outcome)
+        self.case_index += 1
+        self._start_case(self.case_index)
+        self._write(f"New case {self.truth.case_id} started.")
+        self._refresh_header()
         self._refresh_detail(None)
-        if validation.is_correct_suspect and validation.probable_cause:
-            self._write("Case concluded.")
+
+    def _start_case(self, case_index: int, case_id_override: str | None = None) -> None:
+        case_rng = self.base_rng.fork(f"case-{case_index}")
+        case_id = case_id_override or f"case_{self.seed}_{case_index}"
+        self.truth, self.case_facts = generate_case(case_rng, case_id=case_id)
+        self.presentation = project_case(self.truth, case_rng.fork("projection"))
+        current_state = self.state or InvestigationState()
+        self.state = InvestigationState(
+            pressure=current_state.pressure,
+            trust=current_state.trust,
+        )
+        self.board = DeductionBoard()
+        self.prompt_state = None
+        self.selected_evidence_id = None
+        self.last_result = None
+        self.location_id = self.case_facts["crime_scene_id"]
+        self.item_id = self.case_facts["weapon_id"]
 
     def _interview_witness(self):
         witnesses = [p for p in self.truth.people.values() if RoleTag.WITNESS in p.role_tags]
