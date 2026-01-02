@@ -8,6 +8,13 @@ from uuid import UUID
 from noir.deduction.board import DeductionBoard, Hypothesis, MethodType, TimeBucket
 from noir.domain.enums import EvidenceType, EventKind
 from noir.investigation.costs import ActionType, COSTS, clamp, would_exceed_limits
+from noir.investigation.leads import (
+    LeadStatus,
+    apply_lead_decay,
+    lead_for_type,
+    mark_lead_resolved,
+    update_lead_statuses,
+)
 from noir.investigation.results import ActionOutcome, ActionResult, InvestigationState
 from noir.presentation.evidence import EvidenceItem, PresentationCase
 from noir.truth.simulator import apply_action
@@ -65,7 +72,13 @@ def visit_scene(
         location_id,
         metadata={"action": "visit_scene"},
     )
+    notes = update_lead_statuses(state)
     revealed = _reveal(state, presentation, lambda item: item.evidence_type == EvidenceType.FORENSICS)
+    lead = lead_for_type(state, EvidenceType.FORENSICS)
+    if lead and lead.status == LeadStatus.EXPIRED and revealed:
+        notes.extend(apply_lead_decay(lead, revealed))
+    elif revealed:
+        mark_lead_resolved(state, EvidenceType.FORENSICS)
     summary = "You document the scene and collect trace evidence."
     if not revealed:
         summary = "The scene yields no new trace evidence."
@@ -77,6 +90,7 @@ def visit_scene(
         pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         revealed=revealed,
+        notes=notes,
     )
 
 
@@ -98,7 +112,13 @@ def interview(
             cooperation_change=0.0,
         )
     apply_action(truth, EventKind.INTERVIEW, state.time, location_id, participants=[person_id])
+    notes = update_lead_statuses(state)
     revealed = _reveal(state, presentation, lambda item: item.evidence_type == EvidenceType.TESTIMONIAL)
+    lead = lead_for_type(state, EvidenceType.TESTIMONIAL)
+    if lead and lead.status == LeadStatus.EXPIRED and revealed:
+        notes.extend(apply_lead_decay(lead, revealed))
+    elif revealed:
+        mark_lead_resolved(state, EvidenceType.TESTIMONIAL)
     summary = "The interview yields a usable statement."
     if not revealed:
         summary = "The interview adds nothing new."
@@ -110,6 +130,7 @@ def interview(
         pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         revealed=revealed,
+        notes=notes,
     )
 
 
@@ -136,7 +157,13 @@ def request_cctv(
         location_id,
         metadata={"action": "request_cctv"},
     )
+    notes = update_lead_statuses(state)
     revealed = _reveal(state, presentation, lambda item: item.evidence_type == EvidenceType.CCTV)
+    lead = lead_for_type(state, EvidenceType.CCTV)
+    if lead and lead.status == LeadStatus.EXPIRED and revealed:
+        notes.extend(apply_lead_decay(lead, revealed))
+    elif revealed:
+        mark_lead_resolved(state, EvidenceType.CCTV)
     summary = "CCTV footage arrives."
     if not revealed:
         summary = "No usable CCTV footage is available."
@@ -148,6 +175,7 @@ def request_cctv(
         pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         revealed=revealed,
+        notes=notes,
     )
 
 
@@ -178,7 +206,13 @@ def submit_forensics(
         location_id,
         metadata=metadata,
     )
+    notes = update_lead_statuses(state)
     revealed = _reveal(state, presentation, lambda item: item.evidence_type == EvidenceType.FORENSICS)
+    lead = lead_for_type(state, EvidenceType.FORENSICS)
+    if lead and lead.status == LeadStatus.EXPIRED and revealed:
+        notes.extend(apply_lead_decay(lead, revealed))
+    elif revealed:
+        mark_lead_resolved(state, EvidenceType.FORENSICS)
     summary = "Forensics returns a report."
     if not revealed:
         summary = "Forensics finds nothing conclusive."
@@ -190,6 +224,7 @@ def submit_forensics(
         pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         revealed=revealed,
+        notes=notes,
     )
 
 
@@ -228,6 +263,7 @@ def arrest(
         participants=[person_id],
         metadata={"action": "arrest", "person_id": str(person_id)},
     )
+    notes = update_lead_statuses(state)
     outcome = ActionOutcome.SUCCESS
     summary = "Arrest attempted."
     return ActionResult(
@@ -237,6 +273,7 @@ def arrest(
         time_cost=time_cost,
         pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
+        notes=notes,
     )
 
 
@@ -281,6 +318,7 @@ def set_hypothesis(
             cooperation_change=0.0,
         )
 
+    notes = update_lead_statuses(state)
     board.hypothesis = Hypothesis(
         suspect_id=suspect_id,
         method=method,
@@ -295,4 +333,5 @@ def set_hypothesis(
         time_cost=time_cost,
         pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
+        notes=notes,
     )

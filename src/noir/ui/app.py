@@ -21,6 +21,7 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
+from noir.investigation.leads import LeadStatus, build_leads
 from noir.investigation.outcomes import TRUST_LIMIT, apply_case_outcome, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import CCTVReport, ForensicsResult, WitnessStatement
@@ -161,6 +162,8 @@ class Phase05App(App):
         lines: list[str] = []
         lines.append("Detail")
         lines.append(f"Evidence known: {len(self.state.knowledge.known_evidence)}/{len(self.presentation.evidence)}")
+        lines.append("Leads:")
+        lines.extend(self._lead_lines())
         last_result = result or self.last_result
         if last_result is not None:
             lines.append("")
@@ -251,6 +254,20 @@ class Phase05App(App):
         value = confidence.value if hasattr(confidence, "value") else str(confidence)
         mapping = {"strong": "High", "medium": "Medium", "weak": "Low"}
         return mapping.get(value, value.capitalize())
+
+    def _lead_lines(self) -> list[str]:
+        if not self.state.leads:
+            return ["(none)"]
+        lines: list[str] = []
+        for idx, lead in enumerate(self.state.leads, start=1):
+            if lead.status == LeadStatus.ACTIVE:
+                status = f"active until t{lead.deadline}"
+            elif lead.status == LeadStatus.RESOLVED:
+                status = "resolved"
+            else:
+                status = "expired"
+            lines.append(f"{idx}) {lead.label} - {status} ({lead.action_hint})")
+        return lines
 
     def _witness_note(self, item: WitnessStatement) -> str | None:
         if item.observed_person_ids:
@@ -411,6 +428,7 @@ class Phase05App(App):
             pressure=current_state.pressure,
             trust=current_state.trust,
         )
+        self.state.leads = build_leads(self.presentation, start_time=self.state.time)
         self.board = DeductionBoard()
         self.prompt_state = None
         self.selected_evidence_id = None

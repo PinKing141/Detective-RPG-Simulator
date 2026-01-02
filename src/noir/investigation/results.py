@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from noir.investigation.costs import ActionType
 from noir.presentation.evidence import EvidenceItem
@@ -23,6 +24,11 @@ class InvestigationState:
     trust: int = 3
     cooperation: float = 1.0
     knowledge: KnowledgeState = field(default_factory=KnowledgeState)
+    leads: list["Lead"] = field(default_factory=list)
+
+
+if TYPE_CHECKING:
+    from noir.investigation.leads import Lead
 
 
 @dataclass

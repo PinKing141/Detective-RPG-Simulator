@@ -22,6 +22,7 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
+from noir.investigation.leads import LeadStatus, build_leads
 from noir.investigation.outcomes import TRUST_LIMIT, apply_case_outcome, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import WitnessStatement
@@ -106,6 +107,21 @@ def _witness_note(truth, item: WitnessStatement) -> str:
     return "Detective note: Supports the timeline near the scene."
 
 
+def _lead_lines(state: InvestigationState) -> list[str]:
+    if not state.leads:
+        return ["(none)"]
+    lines: list[str] = []
+    for idx, lead in enumerate(state.leads, start=1):
+        if lead.status == LeadStatus.ACTIVE:
+            status = f"active until t{lead.deadline}"
+        elif lead.status == LeadStatus.RESOLVED:
+            status = "resolved"
+        else:
+            status = "expired"
+        lines.append(f"{idx}) {lead.label} - {status} ({lead.action_hint})")
+    return lines
+
+
 def _hypothesis_line(board: DeductionBoard, truth) -> str:
     if board.hypothesis is None:
         return "Hypothesis: (none)"
@@ -187,6 +203,7 @@ def _start_case(
         pressure=next_state.pressure,
         trust=next_state.trust,
     )
+    next_state.leads = build_leads(presentation, start_time=next_state.time)
     board = DeductionBoard()
     location_id = case_facts["crime_scene_id"]
     item_id = case_facts["weapon_id"]
@@ -223,6 +240,9 @@ def main() -> None:
         if supports_line:
             print(supports_line)
         print(f"Evidence known: {len(state.knowledge.known_evidence)}/{len(presentation.evidence)}")
+        print("Leads:")
+        for line in _lead_lines(state):
+            print(f"- {line}")
         print("1) Visit scene")
         print("2) Interview witness")
         print("3) Request CCTV")
