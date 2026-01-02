@@ -6,13 +6,14 @@ from typing import Callable, Optional
 from uuid import UUID
 
 from noir.deduction.board import ClaimType, DeductionBoard, Hypothesis
-from noir.domain.enums import EvidenceType, EventKind
+from noir.domain.enums import ConfidenceBand, EvidenceType, EventKind
 from noir.investigation.costs import ActionType, COSTS, clamp, would_exceed_limits
 from noir.investigation.leads import (
     LeadStatus,
     apply_lead_decay,
     lead_for_type,
     mark_lead_resolved,
+    shorten_lead,
     update_lead_statuses,
 )
 from noir.investigation.results import ActionOutcome, ActionResult, InvestigationState
@@ -34,6 +35,23 @@ def _reveal(
             state.knowledge.known_evidence.append(item.id)
             revealed.append(item)
     return revealed
+
+
+def _apply_cooperation_decay(state: InvestigationState, revealed: list[EvidenceItem]) -> list[str]:
+    if not revealed:
+        return []
+    if state.cooperation >= 0.5:
+        return []
+    notes: list[str] = []
+    for item in revealed:
+        if item.evidence_type != EvidenceType.TESTIMONIAL:
+            continue
+        item.confidence = ConfidenceBand.WEAK
+        item.observed_person_ids = []
+        if hasattr(item, "statement"):
+            item.statement = "The details are unclear; the witness is unsure."
+        notes.append("Low cooperation weakens the witness statement.")
+    return notes
 
 
 def _apply_cost(
@@ -119,6 +137,7 @@ def interview(
         notes.extend(apply_lead_decay(lead, revealed))
     elif revealed:
         mark_lead_resolved(state, EvidenceType.TESTIMONIAL)
+    notes.extend(_apply_cooperation_decay(state, revealed))
     summary = "The interview yields a usable statement."
     if not revealed:
         summary = "The interview adds nothing new."
@@ -164,6 +183,17 @@ def request_cctv(
         notes.extend(apply_lead_decay(lead, revealed))
     elif revealed:
         mark_lead_resolved(state, EvidenceType.CCTV)
+    witness_lead = shorten_lead(state, EvidenceType.TESTIMONIAL, delta=1)
+    if witness_lead and witness_lead.status == LeadStatus.EXPIRED:
+        known = [
+            item
+            for item in presentation.evidence
+            if item.id in set(state.knowledge.known_evidence)
+            and item.evidence_type == EvidenceType.TESTIMONIAL
+        ]
+        if known:
+            notes.extend(apply_lead_decay(witness_lead, known))
+        notes.append("Witness lead went cold after the CCTV request.")
     summary = "CCTV footage arrives."
     if not revealed:
         summary = "No usable CCTV footage is available."

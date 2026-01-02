@@ -54,27 +54,34 @@ def _append_unique(items: list[str], line: str) -> None:
         items.append(line)
 
 
-def _evidence_class_confidence(presentation, evidence_ids) -> dict[str, str]:
+def _evidence_class_profile(presentation, evidence_ids):
     classes: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    labels: dict[str, set[str]] = {}
+    id_set = set(evidence_ids)
     for item in presentation.evidence:
-        if item.id not in set(evidence_ids):
+        if item.id not in id_set:
             continue
         if isinstance(item, (WitnessStatement, CCTVReport)):
             label = _confidence_label(item.confidence)
             classes["testimonial"] = _stronger_confidence(classes.get("testimonial"), label)
+            counts["testimonial"] = counts.get("testimonial", 0) + 1
+            labels.setdefault("testimonial", set()).add(label)
         if isinstance(item, ForensicsResult):
             label = _confidence_label(item.confidence)
             classes["physical"] = _stronger_confidence(classes.get("physical"), label)
-    return classes
+            counts["physical"] = counts.get("physical", 0) + 1
+            labels.setdefault("physical", set()).add(label)
+    return classes, counts, labels
 
 
-def _temporal_confidence(
+def _temporal_status(
     hypothesis,
     presentation,
     evidence_ids,
-) -> str | None:
+) -> tuple[str, str | None]:
     if ClaimType.OPPORTUNITY not in set(hypothesis.claims):
-        return None
+        return "none", None
     windows: list[tuple[int, int]] = []
     confidence: str | None = None
     suspect_placed = False
@@ -92,39 +99,45 @@ def _temporal_confidence(
             if hypothesis.suspect_id in item.observed_person_ids:
                 suspect_placed = True
 
-    if not windows or not suspect_placed:
-        return None
+    if not windows:
+        return "none", confidence
+    if not suspect_placed:
+        return "no_link", confidence
     start = max(window[0] for window in windows)
     end = min(window[1] for window in windows)
     if start > end:
-        return None
+        return "conflict", confidence
     if (end - start) > 2:
-        return None
-    return confidence or "medium"
+        return "broad", confidence
+    return "tight", confidence or "medium"
 
 
 def _arrest_tier(
-    truth: TruthState,
-    hypothesis,
-    presentation,
-    evidence_ids,
     is_correct: bool,
+    classes: dict[str, str],
+    temporal_status: str,
     temporal_confidence: str | None,
+    has_mixed_reliability: bool,
+    has_conflict: bool,
 ) -> tuple[ArrestTier, dict[str, str]]:
     if not is_correct:
         return ArrestTier.FAILED, {}
-    classes = _evidence_class_confidence(presentation, evidence_ids)
-    if temporal_confidence and "physical" in classes:
+    classes = dict(classes)
+    if temporal_status == "tight" and temporal_confidence and "physical" in classes:
         # Temporal evidence becomes structural only when anchored by
         # non-testimonial corroboration.
         classes["temporal"] = temporal_confidence
     has_non_testimonial = "physical" in classes or "temporal" in classes
     has_weak = any(value == "weak" for value in classes.values())
     if len(classes) >= 2 and has_non_testimonial and not has_weak:
-        return ArrestTier.CLEAN, classes
-    if classes:
-        return ArrestTier.SHAKY, classes
-    return ArrestTier.FAILED, classes
+        tier = ArrestTier.CLEAN
+    elif classes:
+        tier = ArrestTier.SHAKY
+    else:
+        tier = ArrestTier.FAILED
+    if tier == ArrestTier.CLEAN and (has_mixed_reliability or has_conflict):
+        tier = ArrestTier.SHAKY
+    return tier, classes
 
 
 def validate_hypothesis(
@@ -155,16 +168,21 @@ def validate_hypothesis(
     supports = list(claim_support.supports)
     missing = list(claim_support.missing)
 
-    temporal_confidence = _temporal_confidence(
+    classes, class_counts, class_labels = _evidence_class_profile(
+        presentation, hypothesis.evidence_ids
+    )
+    temporal_status, temporal_confidence = _temporal_status(
         hypothesis, presentation, hypothesis.evidence_ids
     )
+    has_mixed_reliability = any(len(labels) > 1 for labels in class_labels.values())
+    has_conflict = temporal_status == "conflict"
     tier, classes = _arrest_tier(
-        truth,
-        hypothesis,
-        presentation,
-        hypothesis.evidence_ids,
         is_correct,
+        classes,
+        temporal_status,
         temporal_confidence,
+        has_mixed_reliability,
+        has_conflict,
     )
     if not arrest_assessment.is_probable:
         tier = ArrestTier.FAILED
@@ -172,17 +190,28 @@ def validate_hypothesis(
         _append_unique(missing, "No physical corroboration anchors the account.")
     if "physical" in classes and "testimonial" not in classes:
         _append_unique(missing, "No testimonial evidence anchors the account.")
-    if "temporal" in classes:
-        _append_unique(supports, "Timeline forms a tight opportunity window.")
-    elif temporal_confidence:
-        _append_unique(
-            missing,
-            "Timeline is suggestive but unanchored without physical corroboration.",
-        )
-    else:
+    if temporal_status == "tight":
+        if "temporal" in classes:
+            _append_unique(supports, "Timeline forms a tight opportunity window.")
+        else:
+            _append_unique(
+                missing,
+                "Timeline is suggestive but unanchored without physical corroboration.",
+            )
+    elif temporal_status == "conflict":
+        _append_unique(missing, "Temporal sources conflict; opportunity is unstable.")
+    elif temporal_status == "broad":
         _append_unique(missing, "Timeline is too broad to close opportunity.")
     if any(value == "weak" for value in classes.values()):
         _append_unique(missing, "One or more evidence classes are weak.")
+    if has_mixed_reliability:
+        _append_unique(missing, "Mixed reliability increases interpretive risk.")
+    evidence_count = len(hypothesis.evidence_ids)
+    if evidence_count > len(classes):
+        _append_unique(
+            missing,
+            "Additional evidence overlaps the same failure mode.",
+        )
 
     if tier == ArrestTier.CLEAN:
         summary = "Arrest holds. The case is likely to stick."

@@ -27,6 +27,7 @@ from noir.investigation.outcomes import TRUST_LIMIT, apply_case_outcome, resolve
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import CCTVReport, ForensicsResult, WitnessStatement
 from noir.presentation.projector import project_case
+from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
 
 
@@ -88,6 +89,7 @@ class Phase05App(App):
         self.prompt_state: PromptState | None = None
         self.selected_evidence_id = None
         self.last_result = None
+        self.profile_lines: list[str] = []
 
         self._start_case(self.case_index, case_id_override=self.case_id)
 
@@ -97,7 +99,7 @@ class Phase05App(App):
             yield RichLog(id="log", wrap=True)
             yield VerticalScroll(Static("", id="detail_view", expand=True), id="detail")
             yield Static(self._menu_text(), id="menu")
-            yield Input(placeholder="Enter command (1-6 or q)...", id="command")
+            yield Input(placeholder="Enter command (1-7 or q)...", id="command")
 
     def on_mount(self) -> None:
         self._refresh_header()
@@ -128,7 +130,8 @@ class Phase05App(App):
             "3) Request CCTV\n"
             "4) Submit forensics\n"
             "5) Set hypothesis\n"
-            "6) Arrest"
+            "6) Profiling summary\n"
+            "7) Arrest"
         )
 
     def _write(self, message: str) -> None:
@@ -162,6 +165,12 @@ class Phase05App(App):
         lines.append(f"Evidence known: {len(self.state.knowledge.known_evidence)}/{len(self.presentation.evidence)}")
         lines.append("Leads:")
         lines.extend(self._lead_lines())
+        lines.append("")
+        lines.append("Profiling summary:")
+        if self.profile_lines:
+            lines.extend(self.profile_lines)
+        else:
+            lines.append("(none)")
         last_result = result or self.last_result
         if last_result is not None:
             lines.append("")
@@ -343,6 +352,17 @@ class Phase05App(App):
             self._start_hypothesis_prompt()
             return
         if value == "6":
+            summary = build_profiling_summary(
+                self.presentation, self.state, self.board.hypothesis
+            )
+            self.profile_lines = format_profiling_summary(
+                summary, include_title=False
+            )
+            for line in self.profile_lines:
+                self._write(line)
+            self._refresh_detail(None)
+            return
+        if value == "7":
             if self.board.hypothesis is None:
                 self._write("Set a hypothesis before arrest.")
                 return
@@ -431,6 +451,7 @@ class Phase05App(App):
         self.prompt_state = None
         self.selected_evidence_id = None
         self.last_result = None
+        self.profile_lines = []
         self.location_id = self.case_facts["crime_scene_id"]
         self.item_id = self.case_facts["weapon_id"]
 

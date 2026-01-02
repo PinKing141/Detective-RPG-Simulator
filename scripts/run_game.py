@@ -28,6 +28,7 @@ from noir.investigation.outcomes import TRUST_LIMIT, apply_case_outcome, resolve
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import WitnessStatement
 from noir.presentation.projector import project_case
+from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
 
 
@@ -382,7 +383,8 @@ def main() -> None:
         print("3) Request CCTV")
         print("4) Submit forensics")
         print("5) Set hypothesis")
-        print("6) Arrest suspect")
+        print("6) Profiling summary")
+        print("7) Arrest suspect")
         choice = input("> ").strip().lower()
         if choice == "q":
             break
@@ -418,6 +420,11 @@ def main() -> None:
                 evidence_ids,
             )
         elif choice == "6":
+            summary = build_profiling_summary(presentation, state, board.hypothesis)
+            for line in format_profiling_summary(summary):
+                print(line)
+            continue
+        elif choice == "7":
             if board.hypothesis is None:
                 print("Set a hypothesis before arrest.")
                 continue

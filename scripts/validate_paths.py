@@ -11,6 +11,7 @@ sys.path.insert(0, str(SRC))
 from noir import config
 from noir.cases.truth_generator import generate_case
 from noir.deduction.board import ClaimType, DeductionBoard
+from noir.deduction.scoring import support_for_claims
 from noir.deduction.validation import validate_hypothesis
 from noir.domain.enums import EvidenceType, RoleTag
 from noir.investigation.actions import arrest, interview, request_cctv, set_hypothesis, submit_forensics
@@ -34,6 +35,15 @@ def _find_seed(start_seed: int, max_tries: int) -> int | None:
         ):
             return seed
     return None
+
+
+def _supported_claims(presentation, evidence_ids: list, suspect_id) -> list[ClaimType]:
+    claims: list[ClaimType] = []
+    for claim in ClaimType:
+        support = support_for_claims(presentation, evidence_ids, suspect_id, [claim])
+        if support.supports:
+            claims.append(claim)
+    return claims
 
 
 def _run_path(seed: int, path_name: str) -> None:
@@ -86,6 +96,28 @@ def _run_path(seed: int, path_name: str) -> None:
         evidence = [
             item for item in presentation.evidence if isinstance(item, (CCTVReport, ForensicsResult))
         ]
+    elif path_name == "aggressive":
+        interview(truth, presentation, state, witness.id, location_id)
+        evidence = [item for item in presentation.evidence if isinstance(item, WitnessStatement)]
+        claims = _supported_claims(
+            presentation,
+            [item.id for item in evidence if item.id in state.knowledge.known_evidence],
+            suspect.id,
+        )
+    elif path_name == "cautious":
+        interview(truth, presentation, state, witness.id, location_id)
+        request_cctv(truth, presentation, state, location_id)
+        submit_forensics(truth, presentation, state, location_id, item_id=item_id)
+        evidence = [
+            item
+            for item in presentation.evidence
+            if isinstance(item, (WitnessStatement, CCTVReport, ForensicsResult))
+        ]
+        claims = _supported_claims(
+            presentation,
+            [item.id for item in evidence if item.id in state.knowledge.known_evidence],
+            suspect.id,
+        )
     else:
         raise ValueError(f"Unknown path: {path_name}")
 
@@ -95,6 +127,8 @@ def _run_path(seed: int, path_name: str) -> None:
         print(f"[{path_name}]")
         print("No evidence collected for this path. Skipping.")
         return
+    if not claims:
+        claims = [ClaimType.PRESENCE]
     set_hypothesis(state, board, suspect.id, claims, evidence_ids)
     arrest(truth, presentation, state, suspect.id, location_id, has_hypothesis=True)
     board.sync_from_state(state)
@@ -146,6 +180,8 @@ def main() -> None:
         "witness_cctv",
         "witness_forensics",
         "cctv_forensics",
+        "aggressive",
+        "cautious",
     ]:
         _run_path(seed, path)
 

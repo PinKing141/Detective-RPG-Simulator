@@ -86,6 +86,16 @@ def mark_lead_resolved(state: InvestigationState, evidence_type: EvidenceType) -
         lead.status = LeadStatus.RESOLVED
 
 
+def shorten_lead(state: InvestigationState, evidence_type: EvidenceType, delta: int) -> Lead | None:
+    lead = lead_for_type(state, evidence_type)
+    if lead is None or lead.status != LeadStatus.ACTIVE:
+        return None
+    lead.deadline = max(state.time, lead.deadline - delta)
+    if state.time >= lead.deadline:
+        lead.status = LeadStatus.EXPIRED
+    return lead
+
+
 def apply_lead_decay(lead: Lead, items: list) -> list[str]:
     if lead.status != LeadStatus.EXPIRED:
         return []

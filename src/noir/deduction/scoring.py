@@ -54,7 +54,7 @@ def _temporal_status(known: list[EvidenceItem], suspect_id: UUID) -> str:
     start = max(window[0] for window in windows)
     end = min(window[1] for window in windows)
     if start > end:
-        return "none"
+        return "conflict"
     if (end - start) > 2:
         return "broad"
     return "tight"
@@ -84,6 +84,8 @@ def support_for_claims(
         status = _temporal_status(known, suspect_id)
         if status == "tight":
             support.supports.append("Evidence narrows the opportunity window.")
+        elif status == "conflict":
+            support.missing.append("Temporal sources conflict; opportunity is unstable.")
         elif status == "broad":
             support.missing.append("Timeline is too broad to close opportunity.")
         elif status == "no_link":
