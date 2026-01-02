@@ -117,21 +117,21 @@ Stop condition: If all boxes are ticked, Phase 1 is complete even if UI and pros
 Phase question: Do systems meaningfully interact without convergence?
 
 Interaction proof
-- [ ] Profiling changes priorities and hypotheses, not certainty.
-- [ ] Time pressure invalidates some actions (real trade-offs).
-- [ ] Evidence reliability produces meaningful doubt and alternative interpretations.
-- [ ] Systems constrain each other (choices exclude other choices).
+- [x] Profiling changes priorities and hypotheses, not certainty.
+- [x] Time pressure invalidates some actions (real trade-offs).
+- [x] Evidence reliability produces meaningful doubt and alternative interpretations.
+- [x] Systems constrain each other (choices exclude other choices).
 
 Anti-optimization proof
-- [ ] Interviewing everyone creates a cost (time, pressure, cooperation).
-- [ ] Running every test is impossible (resource gates).
-- [ ] Aggressive play causes downstream problems (trust, legal thresholds, nemesis adaptation).
-- [ ] Cautious play causes different downstream problems (time loss, escalation elsewhere).
+- [x] Interviewing everyone creates a cost (time, pressure, cooperation).
+- [x] Running every test is impossible (resource gates).
+- [x] Aggressive play causes downstream problems (trust, legal thresholds, nemesis adaptation).
+- [x] Cautious play causes different downstream problems (time loss, escalation elsewhere).
 
 Divergence proof
-- [ ] Cautious vs aggressive detectives diverge in outcomes.
-- [ ] Empathy vs intimidation diverge in outcomes.
-- [ ] The nemesis reacts to style, not just progress.
+- [x] Cautious vs aggressive detectives diverge in outcomes.
+- [x] Empathy vs intimidation diverge in outcomes.
+- [x] The nemesis reacts to style, not just progress.
 
 Stop condition: If all boxes are ticked, stop. Roughness is allowed.
 
