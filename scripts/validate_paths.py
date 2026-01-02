@@ -80,7 +80,19 @@ def _run_path(seed: int, path_name: str) -> None:
     location_id = case_facts["crime_scene_id"]
     item_id = case_facts["weapon_id"]
 
-    if path_name == "witness_cctv":
+    if path_name == "witness_only":
+        interview(truth, presentation, state, witness.id, location_id)
+        method = MethodType.UNKNOWN
+        evidence = [item for item in presentation.evidence if isinstance(item, WitnessStatement)]
+    elif path_name == "cctv_only":
+        request_cctv(truth, presentation, state, location_id)
+        method = MethodType.UNKNOWN
+        evidence = [item for item in presentation.evidence if isinstance(item, CCTVReport)]
+    elif path_name == "forensics_only":
+        submit_forensics(truth, presentation, state, location_id, item_id=item_id)
+        method = _method_from_forensics(presentation.evidence)
+        evidence = [item for item in presentation.evidence if isinstance(item, ForensicsResult)]
+    elif path_name == "witness_cctv":
         interview(truth, presentation, state, witness.id, location_id)
         request_cctv(truth, presentation, state, location_id)
         method = MethodType.UNKNOWN
@@ -94,16 +106,30 @@ def _run_path(seed: int, path_name: str) -> None:
         evidence = [
             item for item in presentation.evidence if isinstance(item, (WitnessStatement, ForensicsResult))
         ]
+    elif path_name == "cctv_forensics":
+        request_cctv(truth, presentation, state, location_id)
+        submit_forensics(truth, presentation, state, location_id, item_id=item_id)
+        method = _method_from_forensics(presentation.evidence)
+        evidence = [
+            item for item in presentation.evidence if isinstance(item, (CCTVReport, ForensicsResult))
+        ]
     else:
         raise ValueError(f"Unknown path: {path_name}")
 
     witness_item = next((item for item in evidence if isinstance(item, WitnessStatement)), None)
-    time_bucket = (
-        _bucket_from_window(witness_item.reported_time_window)
-        if witness_item
-        else TimeBucket.MIDNIGHT
-    )
+    cctv_item = next((item for item in evidence if isinstance(item, CCTVReport)), None)
+    if witness_item:
+        time_bucket = _bucket_from_window(witness_item.reported_time_window)
+    elif cctv_item:
+        time_bucket = _bucket_from_window(cctv_item.time_window)
+    else:
+        time_bucket = TimeBucket.MIDNIGHT
     evidence_ids = [item.id for item in evidence if item.id in state.knowledge.known_evidence]
+    if not evidence_ids:
+        print("")
+        print(f"[{path_name}]")
+        print("No evidence collected for this path. Skipping.")
+        return
     set_hypothesis(state, board, suspect.id, method, time_bucket, evidence_ids)
     arrest(truth, presentation, state, suspect.id, location_id, has_hypothesis=True)
     board.sync_from_state(state)
@@ -148,8 +174,15 @@ def main() -> None:
         seed = found
 
     print(f"Validating alternative paths on seed {seed}.")
-    _run_path(seed, "witness_cctv")
-    _run_path(seed, "witness_forensics")
+    for path in [
+        "witness_only",
+        "cctv_only",
+        "forensics_only",
+        "witness_cctv",
+        "witness_forensics",
+        "cctv_forensics",
+    ]:
+        _run_path(seed, path)
 
 
 if __name__ == "__main__":

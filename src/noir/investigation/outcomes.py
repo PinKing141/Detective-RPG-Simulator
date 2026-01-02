@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from noir.deduction.validation import ValidationResult
+from noir.deduction.validation import ArrestTier, ValidationResult
 from noir.investigation.costs import PRESSURE_LIMIT, clamp
 from noir.investigation.results import InvestigationState
 
@@ -28,14 +28,14 @@ TRUST_LIMIT = 6
 
 
 def resolve_case_outcome(validation: ValidationResult) -> CaseOutcome:
-    if validation.is_correct_suspect and validation.probable_cause:
+    if validation.is_correct_suspect and validation.tier == ArrestTier.CLEAN:
         return CaseOutcome(
             arrest_result=ArrestResult.SUCCESS,
             trust_delta=1,
             pressure_delta=-1,
             notes=["Command is satisfied with the charge."],
         )
-    if validation.is_correct_suspect:
+    if validation.is_correct_suspect and validation.tier == ArrestTier.SHAKY:
         return CaseOutcome(
             arrest_result=ArrestResult.PARTIAL,
             trust_delta=0,
