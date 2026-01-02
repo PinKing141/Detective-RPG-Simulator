@@ -1,11 +1,11 @@
-"""Phase 0 investigation actions."""
+"""Phase 1 investigation actions."""
 
 from __future__ import annotations
 
 from typing import Callable, Optional
 from uuid import UUID
 
-from noir.deduction.board import DeductionBoard, Hypothesis, MethodType, TimeBucket
+from noir.deduction.board import ClaimType, DeductionBoard, Hypothesis
 from noir.domain.enums import EvidenceType, EventKind
 from noir.investigation.costs import ActionType, COSTS, clamp, would_exceed_limits
 from noir.investigation.leads import (
@@ -281,8 +281,7 @@ def set_hypothesis(
     state: InvestigationState,
     board: DeductionBoard,
     suspect_id: UUID,
-    method: MethodType,
-    time_bucket: TimeBucket,
+    claims: list[ClaimType],
     evidence_ids: list[UUID],
 ) -> ActionResult:
     if len(evidence_ids) < 1 or len(evidence_ids) > 3:
@@ -290,6 +289,15 @@ def set_hypothesis(
             action=ActionType.SET_HYPOTHESIS,
             outcome=ActionOutcome.FAILURE,
             summary="Hypothesis not set. At least 1 supporting evidence is required.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    if len(claims) < 1 or len(claims) > 3:
+        return ActionResult(
+            action=ActionType.SET_HYPOTHESIS,
+            outcome=ActionOutcome.FAILURE,
+            summary="Hypothesis not set. Select 1 to 3 claims.",
             time_cost=0,
             pressure_cost=0,
             cooperation_change=0.0,
@@ -321,8 +329,7 @@ def set_hypothesis(
     notes = update_lead_statuses(state)
     board.hypothesis = Hypothesis(
         suspect_id=suspect_id,
-        method=method,
-        time_bucket=time_bucket,
+        claims=list(dict.fromkeys(claims)),
         evidence_ids=list(evidence_ids),
     )
     summary = "Hypothesis submitted."

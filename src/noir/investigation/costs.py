@@ -1,4 +1,4 @@
-"""Investigation costs and limits for Phase 0."""
+"""Investigation costs and limits for Phase 1."""
 
 from __future__ import annotations
 

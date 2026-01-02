@@ -9,7 +9,8 @@ from textual.widgets import Input, RichLog, Static
 
 from noir import config
 from noir.cases.truth_generator import generate_case
-from noir.deduction.board import DeductionBoard, MethodType, TimeBucket
+from noir.deduction.board import ClaimType, DeductionBoard
+from noir.deduction.scoring import support_for_claims
 from noir.deduction.validation import validate_hypothesis
 from noir.domain.enums import RoleTag
 from noir.investigation.actions import (
@@ -150,11 +151,8 @@ class Phase05App(App):
             f"Pressure {self.state.pressure}/{PRESSURE_LIMIT}  "
             f"Trust {self.state.trust}/{TRUST_LIMIT}"
         )
-        hypothesis_line = self._hypothesis_line()
-        supports_line = self._supports_line()
-        lines = [time_line, hypothesis_line]
-        if supports_line:
-            lines.append(supports_line)
+        lines = [time_line]
+        lines.extend(self._hypothesis_lines())
         header.update("\n".join(lines))
 
     def _refresh_detail(self, result) -> None:
@@ -190,10 +188,7 @@ class Phase05App(App):
         detail.update("\n".join(lines))
 
     def _format_evidence(self, index: int, item) -> str:
-        base = f"{index}) {item.summary} ({item.evidence_type}, {item.confidence})"
-        if isinstance(item, ForensicsResult):
-            return f"{base} - suggests {item.method_category}"
-        return base
+        return f"{index}) {item.summary} ({item.evidence_type}, {item.confidence})"
 
     def _format_evidence_detail(self, index: int, item) -> list[str]:
         if isinstance(item, WitnessStatement):
@@ -214,6 +209,8 @@ class Phase05App(App):
             note = self._cctv_note(item)
             if note:
                 lines.append(note)
+        if isinstance(item, ForensicsResult):
+            lines.append(f"Finding: {item.finding}")
         return lines
 
     def _selected_evidence(self):
@@ -224,17 +221,14 @@ class Phase05App(App):
                 return item
         return None
 
-    def _format_method(self, method: MethodType) -> str:
+    def _format_claim(self, claim: ClaimType) -> str:
         mapping = {
-            MethodType.SHARP: "Sharp force",
-            MethodType.BLUNT: "Blunt force",
-            MethodType.POISON: "Poison",
-            MethodType.UNKNOWN: "Unknown",
+            ClaimType.PRESENCE: "Present near the scene",
+            ClaimType.OPPORTUNITY: "Opportunity during the time window",
+            ClaimType.MOTIVE: "Motive linked to the victim",
+            ClaimType.BEHAVIOR: "Behavior aligns with the crime",
         }
-        return mapping.get(method, method.value)
-
-    def _format_time_bucket(self, bucket: TimeBucket) -> str:
-        return bucket.value.capitalize()
+        return mapping.get(claim, claim.value)
 
     def _format_hour(self, hour: int) -> str:
         value = hour % 24
@@ -274,48 +268,52 @@ class Phase05App(App):
             person_id = item.observed_person_ids[0]
             person = self.truth.people.get(person_id)
             name = person.name if person else "someone"
-            return f"Detective note: Supports presence near the scene ({name})."
-        return "Detective note: Supports the timeline near the scene."
+            return f"Detective note: Suggests proximity near the location ({name})."
+        return "Detective note: Suggests activity near the location."
 
     def _cctv_note(self, item: CCTVReport) -> str | None:
         if item.observed_person_ids:
             person_id = item.observed_person_ids[0]
             person = self.truth.people.get(person_id)
             name = person.name if person else "someone"
-            return f"Detective note: Footage supports presence near the scene ({name})."
-        return "Detective note: Footage supports movement near the scene."
+            return f"Detective note: Footage suggests proximity near the location ({name})."
+        return "Detective note: Footage suggests movement near the location."
 
-    def _hypothesis_line(self) -> str:
+    def _supporting_evidence_lines(self) -> list[str]:
         if self.board.hypothesis is None:
-            return "Hypothesis: (none)"
+            return []
+        id_set = set(self.board.hypothesis.evidence_ids)
+        lines: list[str] = []
+        for item in self.presentation.evidence:
+            if item.id not in id_set:
+                continue
+            lines.append(f"{item.summary} ({self._format_confidence(item.confidence)})")
+        return lines
+
+    def _hypothesis_lines(self) -> list[str]:
+        if self.board.hypothesis is None:
+            return ["Hypothesis: (none)"]
         suspect = self.truth.people.get(self.board.hypothesis.suspect_id)
         suspect_name = suspect.name if suspect else "Unknown"
-        method = self._format_method(self.board.hypothesis.method)
-        time_bucket = self._format_time_bucket(self.board.hypothesis.time_bucket)
-        evd_count = len(self.board.hypothesis.evidence_ids)
-        return f"Hypothesis: {suspect_name} | {method} | {time_bucket} | Evd: {evd_count}"
-
-    def _supports_line(self) -> str | None:
-        if self.board.hypothesis is None:
-            return None
-        evidence_ids = set(self.board.hypothesis.evidence_ids)
-        counts = {"strong": 0, "med": 0, "weak": 0}
-        for item in self.presentation.evidence:
-            if item.id not in evidence_ids:
-                continue
-            confidence = getattr(item, "confidence", None)
-            if confidence is None:
-                continue
-            value = confidence.value if hasattr(confidence, "value") else str(confidence)
-            if value == "strong":
-                counts["strong"] += 1
-            elif value == "medium":
-                counts["med"] += 1
-            elif value == "weak":
-                counts["weak"] += 1
-        if sum(counts.values()) == 0:
-            return None
-        return f"Supports: strong {counts['strong']} / med {counts['med']} / weak {counts['weak']}"
+        claims = ", ".join(self._format_claim(claim) for claim in self.board.hypothesis.claims)
+        evidence_lines = self._supporting_evidence_lines()
+        if evidence_lines:
+            support_summary = ", ".join(evidence_lines)
+        else:
+            support_summary = "(none)"
+        claim_support = support_for_claims(
+            self.presentation,
+            self.board.hypothesis.evidence_ids,
+            self.board.hypothesis.suspect_id,
+            self.board.hypothesis.claims,
+        )
+        gap_summary = "; ".join(claim_support.missing) if claim_support.missing else "(none)"
+        return [
+            f"Hypothesis: {suspect_name}",
+            f"Claims: {claims or '(none)'}",
+            f"Support: {support_summary}",
+            f"Gaps: {gap_summary}",
+        ]
 
     def _handle_command(self, value: str) -> None:
         if value == "1":
@@ -484,30 +482,19 @@ class Phase05App(App):
                 self._write("Invalid choice.")
                 return
             self.prompt_state.data["suspect_id"] = self.prompt_state.options[selection].id
-            self.prompt_state.step = "hyp_method"
-            self.prompt_state.options = list(MethodType)
-            self._write("Choose method:")
-            for idx, method in enumerate(self.prompt_state.options, start=1):
-                self._write(f"{idx}) {self._format_method(method)}")
+            self.prompt_state.step = "hyp_claims"
+            self.prompt_state.options = list(ClaimType)
+            self._write("Choose 1 to 3 claims (comma-separated):")
+            for idx, claim in enumerate(self.prompt_state.options, start=1):
+                self._write(f"{idx}) {self._format_claim(claim)}")
             return
-        if step == "hyp_method":
-            selection = self._parse_choice(value, len(self.prompt_state.options))
-            if selection is None:
-                self._write("Invalid choice.")
+        if step == "hyp_claims":
+            indices = self._parse_multi_choice(value, len(self.prompt_state.options))
+            if not indices or len(indices) > 3:
+                self._write("Select 1 to 3 claims.")
                 return
-            self.prompt_state.data["method"] = self.prompt_state.options[selection]
-            self.prompt_state.step = "hyp_time"
-            self.prompt_state.options = list(TimeBucket)
-            self._write("Choose time of day:")
-            for idx, bucket in enumerate(self.prompt_state.options, start=1):
-                self._write(f"{idx}) {self._format_time_bucket(bucket)}")
-            return
-        if step == "hyp_time":
-            selection = self._parse_choice(value, len(self.prompt_state.options))
-            if selection is None:
-                self._write("Invalid choice.")
-                return
-            self.prompt_state.data["time_bucket"] = self.prompt_state.options[selection]
+            claims = [self.prompt_state.options[idx] for idx in indices]
+            self.prompt_state.data["claims"] = list(dict.fromkeys(claims))
             self.prompt_state.step = "hyp_evidence"
             evidence_items = [
                 item for item in self.presentation.evidence if item.id in set(self.board.known_evidence_ids)
@@ -538,8 +525,7 @@ class Phase05App(App):
                 self.state,
                 self.board,
                 data["suspect_id"],
-                data["method"],
-                data["time_bucket"],
+                data["claims"],
                 evidence_ids,
             )
             self._apply_action_result(result)
@@ -565,3 +551,14 @@ class Phase05App(App):
             if 0 <= idx < len(items):
                 selected.append(items[idx].id)
         return selected
+
+    def _parse_multi_choice(self, value: str, count: int) -> list[int]:
+        indices: list[int] = []
+        for part in value.split(","):
+            part = part.strip()
+            if not part.isdigit():
+                continue
+            index = int(part) - 1
+            if 0 <= index < count:
+                indices.append(index)
+        return list(dict.fromkeys(indices))

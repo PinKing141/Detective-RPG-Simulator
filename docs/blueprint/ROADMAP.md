@@ -28,7 +28,7 @@ Deliverables
 - Five investigation actions with time and pressure costs:
   - visit_scene, interview, request_cctv, submit_forensics, arrest.
 - Text-only deduction board and validation rules with outcome summary.
-- Explicit set_hypothesis step (suspect, method, time bucket, evidence) required before arrest.
+- Explicit set_hypothesis step (suspect, claims, evidence) required before arrest.
 - Dump script that prints truth, timeline, and alibis.
 - Content atom pack that demonstrates scalable text variety.
 
@@ -60,7 +60,7 @@ Phase 0 is complete when:
 - Determinism holds (same seed yields same truth and evidence).
 - Truth exists independently, presentation is derived and explainable.
 - Actions consume time and pressure, forcing tradeoffs.
-- Player commits a hypothesis (suspect, method or unknown, time window, evidence).
+- Player commits a hypothesis (suspect, claims, evidence).
 - Hypothesis is visible at all times and arrest validates it.
 - Outcomes explain support and missing elements in-world.
 - Players can revise, gamble, be wrong, and continue.
@@ -82,6 +82,11 @@ Phase 0.5 - Textual wrapper (presentation only)
 
 ## Phase 1 - Vertical Slice
 Phase question: Is the core loop fun, fair, and legible?
+
+Design rule:
+- Probable cause is composition-based. Testimonial-only mixes never yield a clean arrest.
+  Temporal coherence upgrades confidence only when anchored by non-testimonial evidence
+  (physical in Phase 1).
 
 Core loop proof
 - [ ] A complete case can be generated from a single hidden Truth state.

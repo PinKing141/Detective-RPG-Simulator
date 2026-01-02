@@ -1,4 +1,4 @@
-"""Deduction board state for Phase 0."""
+"""Deduction board state for Phase 1."""
 
 from __future__ import annotations
 
@@ -9,25 +9,17 @@ from uuid import UUID
 from noir.investigation.results import InvestigationState
 
 
-class MethodType(StrEnum):
-    SHARP = "sharp"
-    BLUNT = "blunt"
-    POISON = "poison"
-    UNKNOWN = "unknown"
-
-
-class TimeBucket(StrEnum):
-    MORNING = "morning"
-    AFTERNOON = "afternoon"
-    EVENING = "evening"
-    MIDNIGHT = "midnight"
+class ClaimType(StrEnum):
+    PRESENCE = "presence"
+    OPPORTUNITY = "opportunity"
+    MOTIVE = "motive"
+    BEHAVIOR = "behavior"
 
 
 @dataclass(frozen=True)
 class Hypothesis:
     suspect_id: UUID
-    method: MethodType
-    time_bucket: TimeBucket
+    claims: list[ClaimType]
     evidence_ids: list[UUID]
 
 

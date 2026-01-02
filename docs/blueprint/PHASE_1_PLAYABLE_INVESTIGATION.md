@@ -154,6 +154,15 @@ Rules:
 - No "wrong" or "correct."
 - Always legible in-world.
 
+## Temporal Gate Rule (Phase 1)
+
+Temporal coherence can upgrade arrest confidence only when anchored by at least one
+non-testimonial evidence class (physical in Phase 1). Testimonial-only mixes (witness
+and CCTV) remain shaky even if time windows align.
+
+Reference: see docs/blueprint/EVIDENCE_COMPOSITION_RULES.md for the locked rule and
+Phase 2 seam.
+
 ## Core Proofs (Phase 1 Acceptance Criteria)
 
 Core loop proof:

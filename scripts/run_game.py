@@ -10,9 +10,10 @@ sys.path.insert(0, str(SRC))
 
 from noir import config
 from noir.cases.truth_generator import generate_case
-from noir.deduction.board import DeductionBoard, MethodType, TimeBucket
+from noir.deduction.board import ClaimType, DeductionBoard
+from noir.deduction.scoring import support_for_claims
 from noir.deduction.validation import validate_hypothesis
-from noir.domain.enums import RoleTag
+from noir.domain.enums import EvidenceType, RoleTag
 from noir.investigation.actions import (
     arrest,
     interview,
@@ -44,6 +45,52 @@ def _choose_enum(enum_type, label_func=None):
     return values[index]
 
 
+def _choose_claims() -> list[ClaimType]:
+    options = list(ClaimType)
+    print("Choose 1 to 3 claims (comma-separated):")
+    for idx, claim in enumerate(options, start=1):
+        print(f"{idx}) {_format_claim(claim)}")
+    choice = input("> ").strip()
+    if not choice:
+        return []
+    indices = []
+    for part in choice.split(","):
+        part = part.strip()
+        if not part.isdigit():
+            continue
+        indices.append(int(part) - 1)
+    selected: list[ClaimType] = []
+    for idx in indices:
+        if 0 <= idx < len(options):
+            selected.append(options[idx])
+    return list(dict.fromkeys(selected))
+
+
+def _observed_suspect_id(presentation, evidence_ids: list) -> object | None:
+    id_set = set(evidence_ids)
+    counts: dict[object, int] = {}
+    for item in presentation.evidence:
+        if item.id not in id_set:
+            continue
+        observed = getattr(item, "observed_person_ids", None)
+        if not observed:
+            continue
+        for person_id in observed:
+            counts[person_id] = counts.get(person_id, 0) + 1
+    if not counts:
+        return None
+    return max(counts, key=counts.get)
+
+
+def _supported_claims(presentation, evidence_ids: list, suspect_id) -> list[ClaimType]:
+    claims: list[ClaimType] = []
+    for claim in ClaimType:
+        support = support_for_claims(presentation, evidence_ids, suspect_id, [claim])
+        if support.supports:
+            claims.append(claim)
+    return claims
+
+
 def _choose_person(truth, role_tag: RoleTag) -> tuple[str, object] | None:
     people = [p for p in truth.people.values() if role_tag in p.role_tags]
     if not people:
@@ -62,18 +109,14 @@ def _choose_person(truth, role_tag: RoleTag) -> tuple[str, object] | None:
     return people[index].name, people[index]
 
 
-def _format_method(method: MethodType) -> str:
+def _format_claim(claim: ClaimType) -> str:
     mapping = {
-        MethodType.SHARP: "Sharp force",
-        MethodType.BLUNT: "Blunt force",
-        MethodType.POISON: "Poison",
-        MethodType.UNKNOWN: "Unknown",
+        ClaimType.PRESENCE: "Present near the scene",
+        ClaimType.OPPORTUNITY: "Opportunity during the time window",
+        ClaimType.MOTIVE: "Motive linked to the victim",
+        ClaimType.BEHAVIOR: "Behavior aligns with the crime",
     }
-    return mapping.get(method, method.value)
-
-
-def _format_time_bucket(bucket: TimeBucket) -> str:
-    return bucket.value.capitalize()
+    return mapping.get(claim, claim.value)
 
 
 def _format_hour(hour: int) -> str:
@@ -103,8 +146,8 @@ def _witness_note(truth, item: WitnessStatement) -> str:
         person_id = item.observed_person_ids[0]
         person = truth.people.get(person_id)
         name = person.name if person else "someone"
-        return f"Detective note: Supports presence near the scene ({name})."
-    return "Detective note: Supports the timeline near the scene."
+        return f"Detective note: Suggests proximity near the location ({name})."
+    return "Detective note: Suggests activity near the location."
 
 
 def _lead_lines(state: InvestigationState) -> list[str]:
@@ -122,38 +165,40 @@ def _lead_lines(state: InvestigationState) -> list[str]:
     return lines
 
 
-def _hypothesis_line(board: DeductionBoard, truth) -> str:
+def _supporting_evidence_lines(presentation, evidence_ids: list) -> list[str]:
+    id_set = set(evidence_ids)
+    lines: list[str] = []
+    for item in presentation.evidence:
+        if item.id not in id_set:
+            continue
+        lines.append(f"{item.summary} ({_format_confidence(item.confidence)})")
+    return lines
+
+
+def _hypothesis_summary_lines(board: DeductionBoard, truth, presentation) -> list[str]:
     if board.hypothesis is None:
-        return "Hypothesis: (none)"
+        return ["Hypothesis: (none)"]
     suspect = truth.people.get(board.hypothesis.suspect_id)
     suspect_name = suspect.name if suspect else "Unknown"
-    method = _format_method(board.hypothesis.method)
-    time_bucket = _format_time_bucket(board.hypothesis.time_bucket)
-    evd_count = len(board.hypothesis.evidence_ids)
-    return f"Hypothesis: {suspect_name} | {method} | {time_bucket} | Evd: {evd_count}"
-
-
-def _supports_line(board: DeductionBoard, presentation) -> str | None:
-    if board.hypothesis is None:
-        return None
-    evidence_ids = set(board.hypothesis.evidence_ids)
-    counts = {"strong": 0, "med": 0, "weak": 0}
-    for item in presentation.evidence:
-        if item.id not in evidence_ids:
-            continue
-        confidence = getattr(item, "confidence", None)
-        if confidence is None:
-            continue
-        value = confidence.value if hasattr(confidence, "value") else str(confidence)
-        if value == "strong":
-            counts["strong"] += 1
-        elif value == "medium":
-            counts["med"] += 1
-        elif value == "weak":
-            counts["weak"] += 1
-    if sum(counts.values()) == 0:
-        return None
-    return f"Supports: strong {counts['strong']} / med {counts['med']} / weak {counts['weak']}"
+    lines = [f"Hypothesis: {suspect_name}"]
+    claim_text = ", ".join(_format_claim(claim) for claim in board.hypothesis.claims)
+    lines.append(f"Claims: {claim_text or '(none)'}")
+    evidence_lines = _supporting_evidence_lines(presentation, board.hypothesis.evidence_ids)
+    if evidence_lines:
+        lines.append("Supporting evidence:")
+        lines.extend(f"- {line}" for line in evidence_lines)
+    else:
+        lines.append("Supporting evidence: (none)")
+    claim_support = support_for_claims(
+        presentation,
+        board.hypothesis.evidence_ids,
+        board.hypothesis.suspect_id,
+        board.hypothesis.claims,
+    )
+    if claim_support.missing:
+        lines.append("Gaps:")
+        lines.extend(f"- {line}" for line in claim_support.missing)
+    return lines
 
 
 def _choose_evidence(truth, presentation, known_ids: list) -> list:
@@ -210,11 +255,102 @@ def _start_case(
     return truth, presentation, next_state, board, location_id, item_id
 
 
+def _find_seed_with_observed(start_seed: int, max_tries: int) -> int | None:
+    for seed in range(start_seed, start_seed + max_tries):
+        base_rng = Rng(seed)
+        case_rng = base_rng.fork("case-1")
+        truth, _ = generate_case(case_rng, case_id=f"case_{seed}_1")
+        presentation = project_case(truth, case_rng.fork("projection"))
+        for item in presentation.evidence:
+            observed = getattr(item, "observed_person_ids", None)
+            if observed and item.evidence_type in (EvidenceType.TESTIMONIAL, EvidenceType.CCTV):
+                return seed
+    return None
+
+
+def _run_smoke(seed: int, case_id: str | None) -> None:
+    base_rng = Rng(seed)
+    truth, presentation, state, board, location_id, item_id = _start_case(
+        base_rng, seed, 1, None, case_id_override=case_id
+    )
+    print(f"[smoke] Case {truth.case_id} started.")
+    witness = next(
+        (p for p in truth.people.values() if RoleTag.WITNESS in p.role_tags), None
+    )
+    if witness:
+        interview(truth, presentation, state, witness.id, location_id)
+    request_cctv(truth, presentation, state, location_id)
+    visit_scene(truth, presentation, state, location_id)
+    board.sync_from_state(state)
+    evidence_ids = list(board.known_evidence_ids)
+    observed_id = _observed_suspect_id(presentation, evidence_ids)
+    if observed_id is None:
+        print("[smoke] No suspect observed in evidence; aborting.")
+        return
+    suspect = truth.people.get(observed_id)
+    if suspect is None:
+        print("[smoke] Observed suspect missing from truth; aborting.")
+        return
+    known_items = [item for item in presentation.evidence if item.id in set(evidence_ids)]
+    observed_items = [
+        item
+        for item in known_items
+        if getattr(item, "observed_person_ids", None) and suspect.id in item.observed_person_ids
+    ]
+    selected_items = observed_items + [item for item in known_items if item not in observed_items]
+    evidence_ids = [item.id for item in selected_items][:3]
+    if not evidence_ids:
+        print("[smoke] No evidence collected; aborting.")
+        return
+    claims = _supported_claims(presentation, evidence_ids, suspect.id)[:3]
+    if not claims:
+        print("[smoke] No supported claims from evidence; aborting.")
+        return
+    result = set_hypothesis(
+        state,
+        board,
+        suspect.id,
+        claims,
+        evidence_ids,
+    )
+    print(f"[smoke] {result.summary}")
+    for line in _hypothesis_summary_lines(board, truth, presentation):
+        print(line)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Phase 0 playable loop.")
+    parser = argparse.ArgumentParser(description="Phase 1 playable loop.")
     parser.add_argument("--seed", type=int, default=config.SEED)
     parser.add_argument("--case-id", type=str, default=None)
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run a short non-interactive smoke path and exit.",
+    )
+    parser.add_argument(
+        "--smoke-find",
+        action="store_true",
+        help="Find a nearby seed with observed evidence for smoke mode.",
+    )
+    parser.add_argument(
+        "--smoke-tries",
+        type=int,
+        default=50,
+        help="How many seeds to scan for smoke mode.",
+    )
     args = parser.parse_args()
+
+    if args.smoke:
+        seed = args.seed
+        if args.smoke_find:
+            found = _find_seed_with_observed(args.seed, args.smoke_tries)
+            if found is None:
+                print("[smoke] No seed found with observed evidence.")
+                return
+            seed = found
+            print(f"[smoke] Using seed {seed}.")
+        _run_smoke(seed, args.case_id)
+        return
 
     base_rng = Rng(args.seed)
     case_index = 1
@@ -235,10 +371,8 @@ def main() -> None:
             f"Pressure: {state.pressure}/{PRESSURE_LIMIT} | "
             f"Trust: {state.trust}/{TRUST_LIMIT}"
         )
-        print(_hypothesis_line(board, truth))
-        supports_line = _supports_line(board, presentation)
-        if supports_line:
-            print(supports_line)
+        for line in _hypothesis_summary_lines(board, truth, presentation):
+            print(line)
         print(f"Evidence known: {len(state.knowledge.known_evidence)}/{len(presentation.evidence)}")
         print("Leads:")
         for line in _lead_lines(state):
@@ -271,23 +405,16 @@ def main() -> None:
             if not selection:
                 print("No suspect available.")
                 continue
-            print("Choose method:")
-            method = _choose_enum(MethodType, _format_method)
-            if method is None:
-                print("Invalid method.")
-                continue
-            print("Choose time of day:")
-            time_bucket = _choose_enum(TimeBucket, _format_time_bucket)
-            if time_bucket is None:
-                print("Invalid time selection.")
+            claims = _choose_claims()
+            if not claims:
+                print("Invalid claim selection.")
                 continue
             evidence_ids = _choose_evidence(truth, presentation, board.known_evidence_ids)
             result = set_hypothesis(
                 state,
                 board,
                 selection[1].id,
-                method,
-                time_bucket,
+                claims,
                 evidence_ids,
             )
         elif choice == "6":
