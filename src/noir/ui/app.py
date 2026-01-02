@@ -20,7 +20,7 @@ from noir.investigation.actions import (
     submit_forensics,
     visit_scene,
 )
-from noir.investigation.costs import ActionType, HEAT_LIMIT, TIME_LIMIT
+from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import CCTVReport, ForensicsResult, WitnessStatement
 from noir.presentation.projector import project_case
@@ -144,7 +144,10 @@ class Phase05App(App):
 
     def _refresh_header(self) -> None:
         header = self.query_one("#header", Static)
-        time_line = f"Case: {self.truth.case_id}  Time {self.state.time}/{TIME_LIMIT}  Heat {self.state.heat}/{HEAT_LIMIT}"
+        time_line = (
+            f"Case: {self.truth.case_id}  Investigation Time {self.state.time}/{TIME_LIMIT}  "
+            f"Pressure {self.state.pressure}/{PRESSURE_LIMIT}"
+        )
         hypothesis_line = self._hypothesis_line()
         supports_line = self._supports_line()
         lines = [time_line, hypothesis_line]
@@ -343,7 +346,9 @@ class Phase05App(App):
 
     def _apply_action_result(self, result) -> None:
         if result.action == ActionType.SET_HYPOTHESIS and result.outcome == ActionOutcome.SUCCESS:
-            self._write(f"{result.summary} (+{result.time_cost} time, +{result.heat_cost} heat)")
+            self._write(
+                f"{result.summary} (+{result.time_cost} time, +{result.pressure_cost} pressure)"
+            )
         else:
             self._write(f"[{result.action}] {result.summary}")
         for item in result.revealed:

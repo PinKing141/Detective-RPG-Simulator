@@ -18,20 +18,20 @@ class ActionType(StrEnum):
 @dataclass(frozen=True)
 class ActionCost:
     time: int
-    heat: int
+    pressure: int
     cooperation_delta: float = 0.0
 
 
 TIME_LIMIT = 8
-HEAT_LIMIT = 6
+PRESSURE_LIMIT = 6
 
 COSTS = {
-    ActionType.VISIT_SCENE: ActionCost(time=1, heat=0),
-    ActionType.INTERVIEW: ActionCost(time=1, heat=0, cooperation_delta=-0.05),
-    ActionType.REQUEST_CCTV: ActionCost(time=1, heat=1),
-    ActionType.SUBMIT_FORENSICS: ActionCost(time=2, heat=0),
-    ActionType.SET_HYPOTHESIS: ActionCost(time=1, heat=0),
-    ActionType.ARREST: ActionCost(time=1, heat=2),
+    ActionType.VISIT_SCENE: ActionCost(time=1, pressure=0),
+    ActionType.INTERVIEW: ActionCost(time=1, pressure=0, cooperation_delta=-0.05),
+    ActionType.REQUEST_CCTV: ActionCost(time=1, pressure=1),
+    ActionType.SUBMIT_FORENSICS: ActionCost(time=2, pressure=0),
+    ActionType.SET_HYPOTHESIS: ActionCost(time=1, pressure=0),
+    ActionType.ARREST: ActionCost(time=1, pressure=2),
 }
 
 
@@ -39,9 +39,9 @@ def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def would_exceed_limits(time: int, heat: int, cost: ActionCost) -> tuple[bool, str]:
+def would_exceed_limits(time: int, pressure: int, cost: ActionCost) -> tuple[bool, str]:
     if time + cost.time > TIME_LIMIT:
         return True, "No time left for that action."
-    if heat + cost.heat > HEAT_LIMIT:
-        return True, "Public heat is too high for that action."
+    if pressure + cost.pressure > PRESSURE_LIMIT:
+        return True, "Institutional pressure is too high for that action."
     return False, ""

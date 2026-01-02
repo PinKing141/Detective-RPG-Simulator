@@ -123,7 +123,7 @@ Soft no (only if the game cannot function without it)
 
 Build these instead (cheap and high payoff)
 - Courtroom sim -> thresholds (detain/arrest/charge/convict) plus DA friction.
-- Open-world travel -> time costs, district heat, and location access gating.
+- Open-world travel -> time costs, district pressure, and location access gating.
 - Perfect forensics -> failure modes (contamination, backlog, partials).
 - NPC schedules -> memory, callbacks, and changing cooperation.
 - Dialogue trees -> modular statement atoms with tone modifiers.
@@ -131,3 +131,22 @@ Build these instead (cheap and high payoff)
 
 ## Core stopping rule
 If the next change improves internal consistency but does not change player decision-making, stop.
+
+## Institutional pressure terminology
+Preferred term: Institutional pressure.
+
+Replace legacy terms:
+- Heat -> Pressure
+- Heat limit -> Pressure tolerance
+- Heat increase -> Pressure rises
+- Heat penalty -> Pressure consequence
+- High heat -> High scrutiny
+
+UI and narrative phrasing examples:
+- "Pressure: 3 / 8"
+- "Pressure from command is increasing."
+- "The department wants results."
+- "You're being watched more closely now."
+
+Hard rule:
+Meters should describe social or institutional forces, not player guilt.

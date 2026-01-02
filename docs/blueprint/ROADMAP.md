@@ -25,7 +25,7 @@ Deliverables
 - Case generator that produces a coherent timeline.
 - Modulator-aware generator that changes evidence footprint.
 - Projector that produces evidence with explainable uncertainty.
-- Five investigation actions with time and heat costs:
+- Five investigation actions with time and pressure costs:
   - visit_scene, interview, request_cctv, submit_forensics, arrest.
 - Text-only deduction board and validation rules with outcome summary.
 - Explicit set_hypothesis step (suspect, method, time bucket, evidence) required before arrest.
@@ -44,7 +44,7 @@ Checklist
 - [ ] Queries can answer alibi-style questions consistently.
 - [ ] Evidence items include source, time collected, and confidence band.
 - [ ] Case modulators are limited to three drivers in Phase 0.
-- [ ] Investigation actions apply time and heat costs.
+- [ ] Investigation actions apply time and pressure costs.
 - [ ] Arrest validation returns a legible explanation.
 - [ ] Hypothesis submission is explicit and required before arrest.
 - [ ] Truth dump exists and reproduces by seed.
@@ -59,7 +59,7 @@ Phase 0 design question:
 Phase 0 is complete when:
 - Determinism holds (same seed yields same truth and evidence).
 - Truth exists independently, presentation is derived and explainable.
-- Actions consume time and heat, forcing tradeoffs.
+- Actions consume time and pressure, forcing tradeoffs.
 - Player commits a hypothesis (suspect, method or unknown, time window, evidence).
 - Hypothesis is visible at all times and arrest validates it.
 - Outcomes explain support and missing elements in-world.
@@ -118,7 +118,7 @@ Interaction proof
 - [ ] Systems constrain each other (choices exclude other choices).
 
 Anti-optimization proof
-- [ ] Interviewing everyone creates a cost (time, heat, cooperation).
+- [ ] Interviewing everyone creates a cost (time, pressure, cooperation).
 - [ ] Running every test is impossible (resource gates).
 - [ ] Aggressive play causes downstream problems (trust, legal thresholds, nemesis adaptation).
 - [ ] Cautious play causes different downstream problems (time loss, escalation elsewhere).

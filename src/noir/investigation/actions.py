@@ -33,13 +33,13 @@ def _apply_cost(
     state: InvestigationState, action: ActionType
 ) -> tuple[bool, str, int, int, float]:
     cost = COSTS[action]
-    blocked, reason = would_exceed_limits(state.time, state.heat, cost)
+    blocked, reason = would_exceed_limits(state.time, state.pressure, cost)
     if blocked:
         return True, reason, 0, 0, 0.0
     state.time += cost.time
-    state.heat += cost.heat
+    state.pressure += cost.pressure
     state.cooperation = clamp(state.cooperation + cost.cooperation_delta, 0.0, 1.0)
-    return False, "", cost.time, cost.heat, cost.cooperation_delta
+    return False, "", cost.time, cost.pressure, cost.cooperation_delta
 
 
 def visit_scene(
@@ -48,14 +48,14 @@ def visit_scene(
     state: InvestigationState,
     location_id: UUID,
 ) -> ActionResult:
-    blocked, reason, time_cost, heat_cost, coop_delta = _apply_cost(state, ActionType.VISIT_SCENE)
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(state, ActionType.VISIT_SCENE)
     if blocked:
         return ActionResult(
             action=ActionType.VISIT_SCENE,
             outcome=ActionOutcome.FAILURE,
             summary=reason,
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
     apply_action(
@@ -74,7 +74,7 @@ def visit_scene(
         outcome=ActionOutcome.SUCCESS,
         summary=summary,
         time_cost=time_cost,
-        heat_cost=heat_cost,
+        pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         revealed=revealed,
     )
@@ -87,14 +87,14 @@ def interview(
     person_id: UUID,
     location_id: UUID,
 ) -> ActionResult:
-    blocked, reason, time_cost, heat_cost, coop_delta = _apply_cost(state, ActionType.INTERVIEW)
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(state, ActionType.INTERVIEW)
     if blocked:
         return ActionResult(
             action=ActionType.INTERVIEW,
             outcome=ActionOutcome.FAILURE,
             summary=reason,
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
     apply_action(truth, EventKind.INTERVIEW, state.time, location_id, participants=[person_id])
@@ -107,7 +107,7 @@ def interview(
         outcome=ActionOutcome.SUCCESS,
         summary=summary,
         time_cost=time_cost,
-        heat_cost=heat_cost,
+        pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         revealed=revealed,
     )
@@ -119,14 +119,14 @@ def request_cctv(
     state: InvestigationState,
     location_id: UUID,
 ) -> ActionResult:
-    blocked, reason, time_cost, heat_cost, coop_delta = _apply_cost(state, ActionType.REQUEST_CCTV)
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(state, ActionType.REQUEST_CCTV)
     if blocked:
         return ActionResult(
             action=ActionType.REQUEST_CCTV,
             outcome=ActionOutcome.FAILURE,
             summary=reason,
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
     apply_action(
@@ -145,7 +145,7 @@ def request_cctv(
         outcome=ActionOutcome.SUCCESS,
         summary=summary,
         time_cost=time_cost,
-        heat_cost=heat_cost,
+        pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         revealed=revealed,
     )
@@ -158,14 +158,14 @@ def submit_forensics(
     location_id: UUID,
     item_id: Optional[UUID] = None,
 ) -> ActionResult:
-    blocked, reason, time_cost, heat_cost, coop_delta = _apply_cost(state, ActionType.SUBMIT_FORENSICS)
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(state, ActionType.SUBMIT_FORENSICS)
     if blocked:
         return ActionResult(
             action=ActionType.SUBMIT_FORENSICS,
             outcome=ActionOutcome.FAILURE,
             summary=reason,
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
     metadata = {"action": "submit_forensics"}
@@ -187,7 +187,7 @@ def submit_forensics(
         outcome=ActionOutcome.SUCCESS,
         summary=summary,
         time_cost=time_cost,
-        heat_cost=heat_cost,
+        pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         revealed=revealed,
     )
@@ -207,17 +207,17 @@ def arrest(
             outcome=ActionOutcome.FAILURE,
             summary="No hypothesis submitted.",
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
-    blocked, reason, time_cost, heat_cost, coop_delta = _apply_cost(state, ActionType.ARREST)
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(state, ActionType.ARREST)
     if blocked:
         return ActionResult(
             action=ActionType.ARREST,
             outcome=ActionOutcome.FAILURE,
             summary=reason,
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
     apply_action(
@@ -235,7 +235,7 @@ def arrest(
         outcome=outcome,
         summary=summary,
         time_cost=time_cost,
-        heat_cost=heat_cost,
+        pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
     )
 
@@ -254,7 +254,7 @@ def set_hypothesis(
             outcome=ActionOutcome.FAILURE,
             summary="Hypothesis not set. At least 1 supporting evidence is required.",
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
     known_ids = set(state.knowledge.known_evidence)
@@ -264,11 +264,11 @@ def set_hypothesis(
             outcome=ActionOutcome.FAILURE,
             summary="Hypothesis uses evidence you have not collected.",
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
 
-    blocked, reason, time_cost, heat_cost, coop_delta = _apply_cost(
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
         state, ActionType.SET_HYPOTHESIS
     )
     if blocked:
@@ -277,7 +277,7 @@ def set_hypothesis(
             outcome=ActionOutcome.FAILURE,
             summary=reason,
             time_cost=0,
-            heat_cost=0,
+            pressure_cost=0,
             cooperation_change=0.0,
         )
 
@@ -293,6 +293,6 @@ def set_hypothesis(
         outcome=ActionOutcome.SUCCESS,
         summary=summary,
         time_cost=time_cost,
-        heat_cost=heat_cost,
+        pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
     )

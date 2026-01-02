@@ -21,7 +21,7 @@ from noir.investigation.actions import (
     submit_forensics,
     visit_scene,
 )
-from noir.investigation.costs import ActionType, HEAT_LIMIT, TIME_LIMIT
+from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import WitnessStatement
 from noir.presentation.projector import project_case
@@ -185,12 +185,18 @@ def main() -> None:
     location_id = case_facts["crime_scene_id"]
     item_id = case_facts["weapon_id"]
 
-    print(f"Case {truth.case_id} started. Time limit {TIME_LIMIT}, heat limit {HEAT_LIMIT}.")
+    print(
+        f"Case {truth.case_id} started. Investigation time limit {TIME_LIMIT}, "
+        f"pressure tolerance {PRESSURE_LIMIT}."
+    )
     print("Type a number to choose an action. Type 'q' to quit.")
 
     while True:
         print("")
-        print(f"Time: {state.time}/{TIME_LIMIT} | Heat: {state.heat}/{HEAT_LIMIT}")
+        print(
+            f"Investigation Time: {state.time}/{TIME_LIMIT} | "
+            f"Pressure: {state.pressure}/{PRESSURE_LIMIT}"
+        )
         print(_hypothesis_line(board, truth))
         supports_line = _supports_line(board, presentation)
         if supports_line:
@@ -260,7 +266,9 @@ def main() -> None:
             continue
 
         if result.action == ActionType.SET_HYPOTHESIS and result.outcome == ActionOutcome.SUCCESS:
-            print(f"{result.summary} (+{result.time_cost} time, +{result.heat_cost} heat)")
+            print(
+                f"{result.summary} (+{result.time_cost} time, +{result.pressure_cost} pressure)"
+            )
         else:
             print(f"[{result.action}] {result.summary}")
         if result.revealed:

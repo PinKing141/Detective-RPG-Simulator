@@ -19,7 +19,7 @@ class ActionOutcome(StrEnum):
 @dataclass
 class InvestigationState:
     time: int = 0
-    heat: int = 0
+    pressure: int = 0
     cooperation: float = 1.0
     knowledge: KnowledgeState = field(default_factory=KnowledgeState)
 
@@ -30,7 +30,7 @@ class ActionResult:
     outcome: ActionOutcome
     summary: str
     time_cost: int
-    heat_cost: int
+    pressure_cost: int
     cooperation_change: float
     revealed: list[EvidenceItem] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)

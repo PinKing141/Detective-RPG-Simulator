@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from noir.investigation.costs import HEAT_LIMIT
+from noir.investigation.costs import PRESSURE_LIMIT
 from noir.investigation.results import InvestigationState
 
 
@@ -21,9 +21,9 @@ def evaluate_arrest(
     count = evidence_count if evidence_count is not None else len(state.knowledge.known_evidence)
     if count < min_evidence:
         explanation.append("Not enough evidence for probable cause.")
-    if state.heat > HEAT_LIMIT:
-        explanation.append("Public heat is too high to justify an arrest.")
-    is_probable = count >= min_evidence and state.heat <= HEAT_LIMIT
+    if state.pressure > PRESSURE_LIMIT:
+        explanation.append("Institutional pressure is too high to justify an arrest.")
+    is_probable = count >= min_evidence and state.pressure <= PRESSURE_LIMIT
     if is_probable:
         explanation.append("Probable cause established.")
     return ArrestAssessment(is_probable=is_probable, explanation=explanation)
