@@ -135,8 +135,30 @@ Divergence proof
 
 Stop condition: If all boxes are ticked, stop. Roughness is allowed.
 
+Phase 2 guardrails (identity and language)
+- Profiling language may reference community-linked cooperation as a lens only.
+- No protected-attribute inference (country, religion, gender) in profiling.
+- No demographic "likely offender" outputs. Identity remains a contextual hook only.
+
 ## Phase 3 - Living World
 Phase question: Does the world remember and react?
+
+Phase 3 naming policy (generator rules)
+- Default display format: First Last. Official format: LAST, First.
+- Short reference style is consistent (choose one: First or Detective Last).
+- Uniqueness: no duplicate full names within a case.
+- Avoid repeating first names within a case unless intentionally related.
+- Use per-case country distribution (primary + secondary), then sample within it.
+- Forename can be gender-filtered when known; surname defaults to neutral.
+- Apply recent-use penalties across cases (rolling windows for first/last names).
+- Deterministic draws per seed (stable RNG order).
+- Name hygiene: remove or quarantine famous names, joke names, slur-adjacent
+  strings, hard-to-render characters, and tone-breaking fantasy names.
+
+Identity hooks (Phase 3 scope)
+- Country and religion are stored as optional hooks, not deterministic traits.
+- These hooks affect access, schedules, and cooperation, not guilt.
+- No profiling outputs that infer criminality from identity.
 
 Memory proof
 - [ ] Named NPCs reference past actions accurately.
@@ -159,17 +181,90 @@ Stop condition: Do not add background simulation. Memory beats simulation.
 
 ## Phase 4 - Campaign and Endings
 Phase question: Do conclusions feel earned, varied, and behavior-reflective?
+Full spec: docs/blueprint/PHASE_4_TASKS.md
 
-Ending coverage
-- [ ] Multiple valid endings exist (not one correct win).
-- [ ] Early endings feel complete, not abrupt.
-- [ ] Failure endings remain story-complete and playable to credits.
-- [ ] Success is not binary (prove/contain/stop vs convict/close).
+Phase 4 is about campaign closure and identity reflection. It reads existing systems.
+It does not add new investigation mechanics or late-game difficulty spikes.
 
-Identity reflection
-- [ ] Ending text reflects methods (by-the-book vs rogue, empathy vs coercion, early arrests vs case-building).
-- [ ] The game can answer: "what kind of detective were you?"
-- [ ] Two successful runs can produce different epilogues.
+Phase 4 identity use (safe scope)
+- Country/religion can add narrative texture and social stakes.
+- Community relationships can carry forward as cooperation modifiers.
+- Still no guilt inference from identity; these are context only.
+
+Phase 4 deliverables (artifacts)
+- Campaign state model (season progress, pressure/trust, arc flags).
+- Case queue and pacing rules (tension wave).
+- Nemesis arc controller (closing-in logic).
+- Endings system (early + final endings).
+- Epilogue generator (identity-based summary).
+- Episode framing (titles, cold opens, end tags, "Previously on...").
+- Save/load includes campaign and ending flags.
+
+Phase 4 systems (what to build)
+1) Campaign structure
+   - Variables: episode_index, case_queue, pressure, trust, clearance_rate (optional),
+     nemesis_progress, nemesis_risk.
+   - Pacing rule: spike, relief, spike, endgame (no invented drama).
+2) Nemesis arc resolution
+   - Closing-in requirements: pattern confidence, narrowing, proof threshold.
+   - Endgame operation: pick one (surveillance, bait, warrant, raid).
+3) Endings
+   - Early endings: trust collapse, pressure saturation, nemesis disengagement,
+     ethical withdrawal. Must feel complete.
+   - Final endings: nemesis outcome + city outcome + detective identity.
+4) Detective identity synthesis
+   - Behavior signals: arrest timing, evidence reliance, pressure tolerance,
+     trust trajectory, coercive vs empathetic approaches.
+5) TV framing
+   - Episode title, cold open, end tag.
+   - "Previously on..." recap from last 3 to 6 events.
+6) Endgame operations framework (single pipeline)
+   - Unified flow: trigger -> plan -> execute -> outcome -> fallout.
+   - Operation wrappers: warrant, stakeout, bait, raid.
+   - No mini-games; all ops share one resolver and fallout model.
+7) Warrant requirements
+   - At least 2 corroborating supports with:
+     - 1 non-testimonial support, or
+     - 2 independent testimonial sources plus coherent timeline.
+8) Endgame ladder
+   - Stakeout -> Warrant -> Raid
+   - Bait -> Raid
+   - At least two viable routes to closure.
+9) Minimal persistence for operations (Phase 4 storage)
+   - operations table: op_type, target, plan, result, fallout, time.
+   - warrants table: type, target, status, scope, support snapshot.
+10) Optional crime variety (controlled expansion)
+   - Use 4 families (person, property, financial, organized).
+   - Reuse at least 70 percent of evidence, actions, and validation.
+   - Only generator/projector templates change. No new evidence classes.
+
+Phase 4 ordered task list
+1. CampaignState model (season progress, pressure/trust, nemesis flags).
+2. Case queue and pacing (tension wave scheduling).
+3. Nemesis closing-in progress (pattern, narrowing, proof).
+4. Operations framework (warrant, stakeout, bait, raid).
+5. Endgame operation (pick one style first, then add wrappers).
+6. Ending triggers + epilogue generator (early + final).
+7. TV framing (titles, recaps, end tags).
+8. Save/load covers campaign + ending state.
+9. Optional crime family expansion (if needed).
+
+Phase 4 exit checklist (hard gate)
+Campaign completeness
+- [ ] A run has a clear beginning, escalation, and endgame.
+- [ ] Pressure/trust curves feel like a season, not random spikes.
+Nemesis resolution
+- [ ] Player can reach an endgame state by skill, not luck.
+- [ ] Nemesis can be caught, lost, or forced underground with legible causes.
+Endings
+- [ ] At least 3 distinct final endings exist.
+- [ ] At least 2 early endings exist and feel complete.
+- [ ] Endings reflect player method, not correctness.
+TV feel
+- [ ] Each case has a title + short intro + short outro.
+- [ ] "Previously on..." recap uses logged events and is readable.
+Legibility
+- [ ] For any ending, the player can explain why it happened in-world.
 
 Stop condition: Ambiguity is allowed. Total explanation is not required.
 

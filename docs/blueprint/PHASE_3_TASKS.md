@@ -41,6 +41,7 @@ Persist aggregates only:
 - trust_level (already exists as trust in InvestigationState)
 - pressure_level (already exists as pressure in InvestigationState)
 - district_status (calm / tense / volatile)
+- location_status (calm / tense / volatile)
 - nemesis_activity (heat or activity level, no adaptation yet)
 
 No individual NPC memory yet.
@@ -108,6 +109,43 @@ Rules:
 - values modify starting conditions
 - values never decide outcomes directly
 
+### Task 1b - Naming Policy (Phase 3, Scoped)
+
+Purpose: keep casts readable, non-repetitive, and deterministic while using the
+existing names database (gender + country fields). This is a generator with
+constraints, not a random picker.
+
+Rules (implemented):
+- Default format: First Last.
+- Uniqueness: no duplicate full names within a case.
+- Avoid repeating first names within a case; avoid visually similar first names.
+- Use a per-case country mix (primary + secondary), then sample names from it.
+- Forenames can be filtered by gender if known; otherwise treat gender as unknown.
+- Prefer neutral surnames; fall back to any surname when needed.
+- Apply recent-use penalties across cases (avoid repeating first/last names in
+  a rolling window).
+- Deterministic draws per seed (stable RNG use).
+
+Rules (deferred):
+- Tone tags (grounded/stylised/archaic) are not in the DB yet.
+- Role-based naming bias is not applied until tone tags exist.
+- Person return continuity requires a people_index table (Phase 3+ extension).
+
+### Task 1c - Identity Hooks (Phase 3, Scoped)
+
+Purpose: store optional identity hooks for continuity and access context only.
+
+Fields (nullable):
+- country_of_origin
+- religion_affiliation
+- religion_observance
+- community_connectedness
+
+Rules:
+- These do not infer guilt or profile outcomes.
+- These influence access/cooperation context only.
+- Use in text as neutral constraints, not conclusions.
+
 ### Task 2 - Case Start Modifiers
 
 Each new case reads from world state:
@@ -138,6 +176,8 @@ Update existing text output to reference state:
 
 This is mostly language, not logic.
 Reuse UI language rules and profiling summary pack.
+Case briefing may include a single neutral line when a returning NPC is present
+("A familiar name is attached to the file.").
 
 ## What Phase 3 Still Does Not Add
 

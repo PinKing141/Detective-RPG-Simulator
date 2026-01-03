@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from textual.app import App, ComposeResult
@@ -23,12 +24,15 @@ from noir.investigation.actions import (
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
 from noir.investigation.leads import LeadStatus, build_leads
-from noir.investigation.outcomes import TRUST_LIMIT, apply_case_outcome, resolve_case_outcome
+from noir.investigation.outcomes import TRUST_LIMIT, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import CCTVReport, ForensicsResult, WitnessStatement
 from noir.presentation.projector import project_case
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
+from noir.persistence.db import WorldStore
+from noir.world.autonomy import apply_autonomy
+from noir.world.state import CaseStartModifiers, PersonRecord, WorldState
 
 
 @dataclass
@@ -77,19 +81,31 @@ class Phase05App(App):
     }
     """
 
-    def __init__(self, seed: int | None = None, case_id: str | None = None) -> None:
+    def __init__(
+        self,
+        seed: int | None = None,
+        case_id: str | None = None,
+        world_db: Path | None = None,
+    ) -> None:
         super().__init__()
         self.seed = seed if seed is not None else config.SEED
         self.case_id = case_id
         self.base_rng = Rng(self.seed)
         self.case_index = 1
-        self.case_history = []
+        self.world_store = WorldStore(world_db) if world_db else None
+        self.world = self.world_store.load_world_state() if self.world_store else WorldState()
+        self.case_start_tick = self.world.tick
+        self.district = "unknown"
+        self.location_name = "unknown"
+        self.case_modifiers = None
         self.state: InvestigationState | None = None
         self.board = DeductionBoard()
         self.prompt_state: PromptState | None = None
         self.selected_evidence_id = None
         self.last_result = None
         self.profile_lines: list[str] = []
+        self._pending_briefing: list[str] = []
+        self._has_mounted = False
 
         self._start_case(self.case_index, case_id_override=self.case_id)
 
@@ -105,9 +121,19 @@ class Phase05App(App):
         self._refresh_header()
         self._refresh_detail(None)
         self._write(f"Case {self.truth.case_id} started.")
+        self._has_mounted = True
+        if self._pending_briefing:
+            for line in self._pending_briefing:
+                self._write(line)
+            self._pending_briefing = []
         self._write("Type a number to choose an action. Type 'q' to quit.")
         self._write("Focus: F6 log, F7 detail, F8 input (Tab cycles focus).")
         self.query_one("#command", Input).focus()
+
+    def on_unmount(self) -> None:
+        if self.world_store:
+            self.world_store.save_world_state(self.world)
+            self.world_store.close()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         value = event.value.strip()
@@ -258,6 +284,38 @@ class Phase05App(App):
         mapping = {"strong": "High", "medium": "Medium", "weak": "Low"}
         return mapping.get(value, value.capitalize())
 
+    def _primary_role_tag(self, role_tags: list[RoleTag]) -> str:
+        if RoleTag.WITNESS in role_tags:
+            return RoleTag.WITNESS.value
+        if RoleTag.OFFENDER in role_tags:
+            return RoleTag.OFFENDER.value
+        if RoleTag.VICTIM in role_tags:
+            return RoleTag.VICTIM.value
+        if RoleTag.SUSPECT in role_tags:
+            return RoleTag.SUSPECT.value
+        return "unknown"
+
+    def _sync_people(self, case_id: str) -> None:
+        for person in self.truth.people.values():
+            person_id = str(person.id)
+            existing = self.world.people_index.get(person_id)
+            country = None
+            if isinstance(person.traits, dict):
+                country = person.traits.get("country_of_origin")
+            record = PersonRecord(
+                person_id=person_id,
+                name=person.name,
+                role_tag=self._primary_role_tag(list(person.role_tags)),
+                country_of_origin=country if isinstance(country, str) else None,
+                religion_affiliation=None,
+                religion_observance=None,
+                community_connectedness=None,
+                created_in_case_id=existing.created_in_case_id if existing else case_id,
+                last_seen_case_id=case_id,
+                last_seen_tick=self.world.tick,
+            )
+            self.world.upsert_person(record)
+
     def _lead_lines(self) -> list[str]:
         if not self.state.leads:
             return ["(none)"]
@@ -352,8 +410,12 @@ class Phase05App(App):
             self._start_hypothesis_prompt()
             return
         if value == "6":
+            context_lines = self.world.context_lines(self.district, self.location_name)
             summary = build_profiling_summary(
-                self.presentation, self.state, self.board.hypothesis
+                self.presentation,
+                self.state,
+                self.board.hypothesis,
+                context_lines=context_lines,
             )
             self.profile_lines = format_profiling_summary(
                 summary, include_title=False
@@ -381,6 +443,9 @@ class Phase05App(App):
         self._write("Unknown action.")
 
     def _apply_action_result(self, result) -> None:
+        autonomy_notes = apply_autonomy(self.state, self.world, self.district)
+        if autonomy_notes:
+            result.notes.extend(autonomy_notes)
         if result.action == ActionType.SET_HYPOTHESIS and result.outcome == ActionOutcome.SUCCESS:
             self._write(
                 f"{result.summary} (+{result.time_cost} time, +{result.pressure_cost} pressure)"
@@ -428,9 +493,23 @@ class Phase05App(App):
         self._write(f"Case outcome: {outcome.arrest_result}.")
         for note in outcome.notes:
             self._write(f"- {note}")
-        self.case_history.append(outcome)
-        self.state = apply_case_outcome(self.state, outcome)
+        case_end_tick = self.case_start_tick + self.state.time
+        world_notes = self.world.apply_case_outcome(
+            outcome,
+            self.truth.case_id,
+            self.seed,
+            self.district,
+            self.location_name,
+            self.case_start_tick,
+            case_end_tick,
+        )
+        if self.world_store:
+            self.world_store.save_world_state(self.world)
+            self.world_store.record_case(self.world.case_history[-1])
+        for note in world_notes:
+            self._write(f"- {note}")
         self.case_index += 1
+        self.case_start_tick = self.world.tick
         self._start_case(self.case_index)
         self._write(f"New case {self.truth.case_id} started.")
         self._refresh_header()
@@ -439,14 +518,28 @@ class Phase05App(App):
     def _start_case(self, case_index: int, case_id_override: str | None = None) -> None:
         case_rng = self.base_rng.fork(f"case-{case_index}")
         case_id = case_id_override or f"case_{self.seed}_{case_index}"
-        self.truth, self.case_facts = generate_case(case_rng, case_id=case_id)
+        self.truth, self.case_facts = generate_case(case_rng, case_id=case_id, world=self.world)
         self.presentation = project_case(self.truth, case_rng.fork("projection"))
-        current_state = self.state or InvestigationState()
-        self.state = InvestigationState(
-            pressure=current_state.pressure,
-            trust=current_state.trust,
+        self.case_start_tick = self.world.tick
+        location = self.truth.locations.get(self.case_facts["crime_scene_id"])
+        self.district = location.district if location else "unknown"
+        self.location_name = location.name if location else "unknown"
+        self.case_modifiers = self.world.case_start_modifiers(
+            self.district, self.location_name
         )
-        self.state.leads = build_leads(self.presentation, start_time=self.state.time)
+        has_returning = self.world.has_returning_person(
+            self.truth.people, self.truth.case_id
+        )
+        self.state = InvestigationState(
+            pressure=self.world.pressure,
+            trust=self.world.trust,
+            cooperation=self.case_modifiers.cooperation,
+        )
+        self.state.leads = build_leads(
+            self.presentation,
+            start_time=self.state.time,
+            deadline_delta=self.case_modifiers.lead_deadline_delta,
+        )
         self.board = DeductionBoard()
         self.prompt_state = None
         self.selected_evidence_id = None
@@ -454,6 +547,20 @@ class Phase05App(App):
         self.profile_lines = []
         self.location_id = self.case_facts["crime_scene_id"]
         self.item_id = self.case_facts["weapon_id"]
+        self._sync_people(self.truth.case_id)
+        if has_returning:
+            self.case_modifiers = CaseStartModifiers(
+                cooperation=self.case_modifiers.cooperation,
+                lead_deadline_delta=self.case_modifiers.lead_deadline_delta,
+                briefing_lines=self.case_modifiers.briefing_lines
+                + ["A familiar name is attached to the file."],
+            )
+        if self.case_modifiers:
+            if self._has_mounted:
+                for line in self.case_modifiers.briefing_lines:
+                    self._write(line)
+            else:
+                self._pending_briefing = list(self.case_modifiers.briefing_lines)
 
     def _interview_witness(self):
         witnesses = [p for p in self.truth.people.values() if RoleTag.WITNESS in p.role_tags]

@@ -39,6 +39,13 @@ This is the design contract. If a feature conflicts with these rules, the featur
 - Religion, intelligence, and personality are color unless promoted to an active modulator.
 - Intelligence is domain competence, not a generic IQ slider.
 
+## Phase 4 guardrails
+- Endings reflect behavior under pressure, not correctness or scores.
+- Early endings are full epilogues, never failure screens.
+- Phase 4 reads existing systems only; no new mechanics or difficulty spikes.
+- Nemesis resolution is optional and never defines victory alone.
+- Endgame operations are wrappers around the same pipeline, not mini-games.
+
 ## Decision and trade-off rules
 - Decision gate: you can name the player decision in one sentence.
 - Trade-off gate: every use has a cost or locks out alternatives.

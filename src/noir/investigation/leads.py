@@ -45,13 +45,15 @@ LEAD_ACTIONS = {
 }
 
 
-def build_leads(presentation, start_time: int = 0) -> list[Lead]:
+def build_leads(
+    presentation, start_time: int = 0, deadline_delta: int = 0
+) -> list[Lead]:
     types_present = {item.evidence_type for item in presentation.evidence}
     leads: list[Lead] = []
     for evidence_type in [EvidenceType.TESTIMONIAL, EvidenceType.CCTV, EvidenceType.FORENSICS]:
         if evidence_type not in types_present:
             continue
-        deadline = start_time + LEAD_DEADLINES[evidence_type]
+        deadline = start_time + max(0, LEAD_DEADLINES[evidence_type] - max(0, deadline_delta))
         leads.append(
             Lead(
                 key=evidence_type.value,

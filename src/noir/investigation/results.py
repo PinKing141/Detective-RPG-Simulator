@@ -23,6 +23,7 @@ class InvestigationState:
     pressure: int = 0
     trust: int = 3
     cooperation: float = 1.0
+    autonomy_marks: set[str] = field(default_factory=set)
     knowledge: KnowledgeState = field(default_factory=KnowledgeState)
     leads: list["Lead"] = field(default_factory=list)
 

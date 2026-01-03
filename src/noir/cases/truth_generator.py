@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Optional
 from uuid import UUID
 
 from noir.cases.archetypes import PHASE0_MODULATORS
 from noir.domain.enums import EventKind, ItemType, RoleTag
 from noir.domain.models import Item, Location, Person
+from noir.naming import NamePick, load_name_generator
 from noir.truth.graph import TruthState
 from noir.util.rng import Rng
-
-FIRST_NAMES = ["Alex", "Blake", "Casey", "Drew", "Morgan", "Riley"]
-LAST_NAMES = ["Hale", "Iverson", "Kerr", "Lane", "Maddox", "Sloane"]
+from noir.world.state import WorldState
 DISTRICTS = ["harbor", "midtown", "old_quarter", "riverside"]
 PUBLIC_LOCATIONS = [
     "Marlowe Diner",
@@ -28,9 +27,18 @@ ACCESS_PATHS = ["forced_entry", "social_entry", "trusted_contact"]
 MOTIVES = ["money", "revenge", "obsession", "concealment", "thrill"]
 RELATIONSHIP_DISTANCES = ["intimate", "acquaintance", "stranger"]
 
+_NAME_GENERATOR = None
 
-def _full_name(rng: Rng) -> str:
-    return f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}"
+
+def _name_context(rng: Rng):
+    global _NAME_GENERATOR
+    if _NAME_GENERATOR is None:
+        _NAME_GENERATOR = load_name_generator()
+    return _NAME_GENERATOR.start_case(rng)
+
+
+def _name_pick(rng: Rng, context) -> NamePick:
+    return context.next_name_pick(rng)
 
 
 def _method_category(weapon_name: str) -> str:
@@ -42,7 +50,11 @@ def _method_category(weapon_name: str) -> str:
     return "sharp"
 
 
-def generate_case(rng: Rng, case_id: str | None = None) -> tuple[TruthState, Dict[str, UUID | int | str]]:
+def generate_case(
+    rng: Rng,
+    case_id: str | None = None,
+    world: Optional[WorldState] = None,
+) -> tuple[TruthState, Dict[str, UUID | int | str]]:
     case_id = case_id or f"case_{rng.seed}"
     truth = TruthState(case_id=case_id, seed=rng.seed)
 
@@ -57,6 +69,9 @@ def generate_case(rng: Rng, case_id: str | None = None) -> tuple[TruthState, Dic
         location_name = rng.choice(PRIVATE_LOCATIONS)
         location_tags = ["crime_scene", "private"]
 
+    name_rng = rng.fork("names")
+    name_context = _name_context(name_rng)
+
     crime_scene = Location(
         name=location_name,
         district=rng.choice(DISTRICTS),
@@ -64,17 +79,54 @@ def generate_case(rng: Rng, case_id: str | None = None) -> tuple[TruthState, Dic
     )
     truth.add_location(crime_scene)
 
-    victim = Person(name=_full_name(rng), role_tags=[RoleTag.VICTIM])
-    offender = Person(
-        name=_full_name(rng),
-        role_tags=[RoleTag.SUSPECT, RoleTag.OFFENDER],
-        traits={
-            "competence": competence,
-            "risk_tolerance": risk_tolerance,
-            "relationship_distance": relationship_distance,
-        },
+    returning_witness = None
+    if world:
+        returning_witness = world.pick_returning_person(
+            name_rng, RoleTag.WITNESS.value, chance=0.25
+        )
+
+    victim_pick = _name_pick(name_rng, name_context)
+    victim_traits: dict[str, float | str] = {}
+    if victim_pick.country:
+        victim_traits["country_of_origin"] = victim_pick.country
+    victim = Person(
+        name=victim_pick.full,
+        role_tags=[RoleTag.VICTIM],
+        traits=victim_traits,
     )
-    witness = Person(name=_full_name(rng), role_tags=[RoleTag.WITNESS])
+    offender_pick = _name_pick(name_rng, name_context)
+    offender_traits: dict[str, float | str] = {
+        "competence": competence,
+        "risk_tolerance": risk_tolerance,
+        "relationship_distance": relationship_distance,
+    }
+    if offender_pick.country:
+        offender_traits["country_of_origin"] = offender_pick.country
+    offender = Person(
+        name=offender_pick.full,
+        role_tags=[RoleTag.SUSPECT, RoleTag.OFFENDER],
+        traits=offender_traits,
+    )
+    if returning_witness:
+        witness_traits: dict[str, float | str] = {}
+        if returning_witness.country_of_origin:
+            witness_traits["country_of_origin"] = returning_witness.country_of_origin
+        witness = Person(
+            id=UUID(returning_witness.person_id),
+            name=returning_witness.name,
+            role_tags=[RoleTag.WITNESS],
+            traits=witness_traits,
+        )
+    else:
+        witness_pick = _name_pick(name_rng, name_context)
+        witness_traits: dict[str, float | str] = {}
+        if witness_pick.country:
+            witness_traits["country_of_origin"] = witness_pick.country
+        witness = Person(
+            name=witness_pick.full,
+            role_tags=[RoleTag.WITNESS],
+            traits=witness_traits,
+        )
     truth.add_person(victim)
     truth.add_person(offender)
     truth.add_person(witness)

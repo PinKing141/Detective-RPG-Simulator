@@ -24,12 +24,15 @@ from noir.investigation.actions import (
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
 from noir.investigation.leads import LeadStatus, build_leads
-from noir.investigation.outcomes import TRUST_LIMIT, apply_case_outcome, resolve_case_outcome
+from noir.investigation.outcomes import TRUST_LIMIT, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.presentation.evidence import WitnessStatement
 from noir.presentation.projector import project_case
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
+from noir.persistence.db import WorldStore
+from noir.world.autonomy import apply_autonomy
+from noir.world.state import CaseStartModifiers, PersonRecord, WorldState
 
 
 def _choose_enum(enum_type, label_func=None):
@@ -108,6 +111,39 @@ def _choose_person(truth, role_tag: RoleTag) -> tuple[str, object] | None:
     if index < 0 or index >= len(people):
         return None
     return people[index].name, people[index]
+
+def _primary_role_tag(role_tags: list[RoleTag]) -> str:
+    if RoleTag.WITNESS in role_tags:
+        return RoleTag.WITNESS.value
+    if RoleTag.OFFENDER in role_tags:
+        return RoleTag.OFFENDER.value
+    if RoleTag.VICTIM in role_tags:
+        return RoleTag.VICTIM.value
+    if RoleTag.SUSPECT in role_tags:
+        return RoleTag.SUSPECT.value
+    return "unknown"
+
+
+def _sync_people(world: WorldState, truth, case_id: str, tick: int) -> None:
+    for person in truth.people.values():
+        person_id = str(person.id)
+        existing = world.people_index.get(person_id)
+        country = None
+        if isinstance(person.traits, dict):
+            country = person.traits.get("country_of_origin")
+        record = PersonRecord(
+            person_id=person_id,
+            name=person.name,
+            role_tag=_primary_role_tag(list(person.role_tags)),
+            country_of_origin=country if isinstance(country, str) else None,
+            religion_affiliation=None,
+            religion_observance=None,
+            community_connectedness=None,
+            created_in_case_id=existing.created_in_case_id if existing else case_id,
+            last_seen_case_id=case_id,
+            last_seen_tick=tick,
+        )
+        world.upsert_person(record)
 
 
 def _format_claim(claim: ClaimType) -> str:
@@ -237,23 +273,51 @@ def _start_case(
     base_rng: Rng,
     seed: int,
     case_index: int,
-    state: InvestigationState | None,
+    world: WorldState,
     case_id_override: str | None = None,
 ):
     case_rng = base_rng.fork(f"case-{case_index}")
     case_id = case_id_override or f"case_{seed}_{case_index}"
-    truth, case_facts = generate_case(case_rng, case_id=case_id)
+    truth, case_facts = generate_case(case_rng, case_id=case_id, world=world)
     presentation = project_case(truth, case_rng.fork("projection"))
-    next_state = state or InvestigationState()
+    location = truth.locations.get(case_facts["crime_scene_id"])
+    district = location.district if location else "unknown"
+    location_name = location.name if location else "unknown"
+    modifiers = world.case_start_modifiers(district, location_name)
+    has_returning = world.has_returning_person(truth.people, case_id)
     next_state = InvestigationState(
-        pressure=next_state.pressure,
-        trust=next_state.trust,
+        pressure=world.pressure,
+        trust=world.trust,
+        cooperation=modifiers.cooperation,
     )
-    next_state.leads = build_leads(presentation, start_time=next_state.time)
+    next_state.leads = build_leads(
+        presentation,
+        start_time=next_state.time,
+        deadline_delta=modifiers.lead_deadline_delta,
+    )
+    _sync_people(world, truth, case_id, world.tick)
+    if has_returning:
+        modifiers = CaseStartModifiers(
+            cooperation=modifiers.cooperation,
+            lead_deadline_delta=modifiers.lead_deadline_delta,
+            briefing_lines=modifiers.briefing_lines
+            + ["A familiar name is attached to the file."],
+        )
+
     board = DeductionBoard()
     location_id = case_facts["crime_scene_id"]
     item_id = case_facts["weapon_id"]
-    return truth, presentation, next_state, board, location_id, item_id
+    return (
+        truth,
+        presentation,
+        next_state,
+        board,
+        location_id,
+        item_id,
+        district,
+        location_name,
+        modifiers,
+    )
 
 
 def _find_seed_with_observed(start_seed: int, max_tries: int) -> int | None:
@@ -271,8 +335,9 @@ def _find_seed_with_observed(start_seed: int, max_tries: int) -> int | None:
 
 def _run_smoke(seed: int, case_id: str | None) -> None:
     base_rng = Rng(seed)
-    truth, presentation, state, board, location_id, item_id = _start_case(
-        base_rng, seed, 1, None, case_id_override=case_id
+    world = WorldState()
+    truth, presentation, state, board, location_id, item_id, _, _, _ = _start_case(
+        base_rng, seed, 1, world, case_id_override=case_id
     )
     print(f"[smoke] Case {truth.case_id} started.")
     witness = next(
@@ -324,6 +389,17 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=config.SEED)
     parser.add_argument("--case-id", type=str, default=None)
     parser.add_argument(
+        "--world-db",
+        type=str,
+        default=str(ROOT / "data" / "world_state.db"),
+        help="SQLite database path for world state.",
+    )
+    parser.add_argument(
+        "--no-world-db",
+        action="store_true",
+        help="Run without persisting world state.",
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="Run a short non-interactive smoke path and exit.",
@@ -353,16 +429,25 @@ def main() -> None:
         _run_smoke(seed, args.case_id)
         return
 
+    world_store = None
+    world = WorldState()
+    if not args.no_world_db:
+        world_store = WorldStore(Path(args.world_db))
+        world = world_store.load_world_state()
+
     base_rng = Rng(args.seed)
     case_index = 1
-    truth, presentation, state, board, location_id, item_id = _start_case(
-        base_rng, args.seed, case_index, None, case_id_override=args.case_id
+    case_start_tick = world.tick
+    truth, presentation, state, board, location_id, item_id, district, location_name, modifiers = _start_case(
+        base_rng, args.seed, case_index, world, case_id_override=args.case_id
     )
 
     print(
         f"Case {truth.case_id} started. Investigation time limit {TIME_LIMIT}, "
         f"pressure tolerance {PRESSURE_LIMIT}, trust {state.trust}/{TRUST_LIMIT}."
     )
+    for line in modifiers.briefing_lines:
+        print(line)
     print("Type a number to choose an action. Type 'q' to quit.")
 
     while True:
@@ -420,7 +505,13 @@ def main() -> None:
                 evidence_ids,
             )
         elif choice == "6":
-            summary = build_profiling_summary(presentation, state, board.hypothesis)
+            context_lines = world.context_lines(district, location_name)
+            summary = build_profiling_summary(
+                presentation,
+                state,
+                board.hypothesis,
+                context_lines=context_lines,
+            )
             for line in format_profiling_summary(summary):
                 print(line)
             continue
@@ -439,6 +530,10 @@ def main() -> None:
         else:
             print("Unknown action.")
             continue
+
+        autonomy_notes = apply_autonomy(state, world, district)
+        if autonomy_notes:
+            result.notes.extend(autonomy_notes)
 
         if result.action == ActionType.SET_HYPOTHESIS and result.outcome == ActionOutcome.SUCCESS:
             print(
@@ -482,16 +577,37 @@ def main() -> None:
             print(f"Case outcome: {outcome.arrest_result}.")
             for note in outcome.notes:
                 print(f"- {note}")
-            state = apply_case_outcome(state, outcome)
+            case_end_tick = case_start_tick + state.time
+            world_notes = world.apply_case_outcome(
+                outcome,
+                truth.case_id,
+                args.seed,
+                district,
+                location_name,
+                case_start_tick,
+                case_end_tick,
+            )
+            if world_store:
+                world_store.save_world_state(world)
+                world_store.record_case(world.case_history[-1])
+            for note in world_notes:
+                print(f"- {note}")
             case_index += 1
-            truth, presentation, state, board, location_id, item_id = _start_case(
-                base_rng, args.seed, case_index, state
+            case_start_tick = world.tick
+            truth, presentation, state, board, location_id, item_id, district, location_name, modifiers = _start_case(
+                base_rng, args.seed, case_index, world
             )
             print(
                 f"New case {truth.case_id} started. "
                 f"Pressure {state.pressure}/{PRESSURE_LIMIT}, "
                 f"Trust {state.trust}/{TRUST_LIMIT}."
             )
+            for line in modifiers.briefing_lines:
+                print(line)
+
+    if world_store:
+        world_store.save_world_state(world)
+        world_store.close()
 
 
 if __name__ == "__main__":

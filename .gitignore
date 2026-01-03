@@ -9,3 +9,4 @@ dist/
 build/
 *.db-shm
 *.db-wal
+data/world_state.db

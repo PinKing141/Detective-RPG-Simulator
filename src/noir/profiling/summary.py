@@ -50,6 +50,7 @@ def build_profiling_summary(
     presentation,
     state: InvestigationState,
     hypothesis,
+    context_lines: list[str] | None = None,
 ) -> ProfilingSummary:
     items = _known_items(presentation, state)
     counts = _evidence_profile(items)
@@ -68,6 +69,8 @@ def build_profiling_summary(
             "Current supports do not cohere; contradictions increase interpretive risk.",
             "The case contains competing readings that cannot be collapsed yet.",
         ]
+        if context_lines:
+            working_frame = list(context_lines) + working_frame
         focus_shifts = [
             "Prioritise resolving the contradiction before expanding scope.",
             "Check whether the conflict is source failure rather than event failure.",
@@ -84,6 +87,8 @@ def build_profiling_summary(
             "Pressure is shaping what you can still learn, not what is true.",
             "Time limits are beginning to function as evidence erosion.",
         ]
+        if context_lines:
+            working_frame = list(context_lines) + working_frame
         focus_shifts = [
             "Front-load the most perishable leads.",
             "Choose one corroboration pillar and pursue it fully.",
@@ -100,6 +105,8 @@ def build_profiling_summary(
             "Current reads are constrained by testimony and memory-dependent detail.",
             "Most supports currently describe proximity, not linkage.",
         ]
+        if context_lines:
+            working_frame = list(context_lines) + working_frame
         focus_shifts = [
             "Prioritise non-testimonial corroboration of presence.",
             "Seek a constraint that survives cross-checking: access, movement, or artifacts.",
@@ -116,6 +123,8 @@ def build_profiling_summary(
             "Physical traces are present, but they do not yet anchor to a person or route.",
             "Artifacts suggest contact, but attribution remains open.",
         ]
+        if context_lines:
+            working_frame = list(context_lines) + working_frame
         focus_shifts = [
             "Convert trace into linkage: ownership, access, opportunity, or transfer path.",
             "Use timeline constraints to test feasibility rather than searching for more traces.",
@@ -132,6 +141,8 @@ def build_profiling_summary(
             "Your working hypothesis has supports, but relies on one pillar more than corroboration.",
             "The current case shape allows commitment, but not closure.",
         ]
+        if context_lines:
+            working_frame = list(context_lines) + working_frame
         focus_shifts = [
             "If committing now, choose the narrowest claim you can defend.",
             "If delaying, prioritise a single corroboration action rather than broad searching.",
@@ -146,6 +157,8 @@ def build_profiling_summary(
     working_frame = [
         "Available information reduces the space of possibilities, but does not settle attribution.",
     ]
+    if context_lines:
+        working_frame = list(context_lines) + working_frame
     focus_shifts = [
         "Prioritise corroboration from a different evidence class.",
         "Resolve the time window before committing to an arrest.",
