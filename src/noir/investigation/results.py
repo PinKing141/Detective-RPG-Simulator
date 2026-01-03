@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from noir.investigation.costs import ActionType
 from noir.presentation.evidence import EvidenceItem
 from noir.presentation.knowledge import KnowledgeState
+from noir.locations.profiles import ScenePOI
 
 
 class ActionOutcome(StrEnum):
@@ -26,6 +27,9 @@ class InvestigationState:
     autonomy_marks: set[str] = field(default_factory=set)
     knowledge: KnowledgeState = field(default_factory=KnowledgeState)
     leads: list["Lead"] = field(default_factory=list)
+    scene_pois: list[ScenePOI] = field(default_factory=list)
+    visited_poi_ids: set[str] = field(default_factory=set)
+    body_poi_id: str | None = None
 
 
 if TYPE_CHECKING:

@@ -19,6 +19,7 @@ class EvidenceItem(BaseModel):
     source: str
     time_collected: int
     confidence: ConfidenceBand
+    poi_id: str | None = None
 
 
 class WitnessStatement(EvidenceItem):
@@ -40,6 +41,13 @@ class ForensicsResult(EvidenceItem):
     finding: str
     method: str
     method_category: str
+
+
+class ForensicObservation(EvidenceItem):
+    observation: str
+    tod_window: Tuple[int, int] | None = None
+    wound_class: str | None = None
+    stage_hint: str | None = None
 
 
 class PresentationCase(BaseModel):

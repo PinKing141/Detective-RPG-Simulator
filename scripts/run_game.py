@@ -9,6 +9,7 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from noir import config
+from noir.cases.archetypes import CaseArchetype
 from noir.cases.truth_generator import generate_case
 from noir.deduction.board import ClaimType, DeductionBoard
 from noir.deduction.scoring import support_for_claims
@@ -26,7 +27,8 @@ from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
 from noir.investigation.leads import LeadStatus, build_leads
 from noir.investigation.outcomes import TRUST_LIMIT, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
-from noir.presentation.evidence import WitnessStatement
+from noir.locations.profiles import ScenePOI
+from noir.presentation.evidence import ForensicObservation, WitnessStatement
 from noir.presentation.projector import project_case
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
@@ -111,6 +113,29 @@ def _choose_person(truth, role_tag: RoleTag) -> tuple[str, object] | None:
     if index < 0 or index >= len(people):
         return None
     return people[index].name, people[index]
+
+
+def _poi_display_label(state: InvestigationState, poi: ScenePOI) -> str:
+    label = f"{poi.zone_label} - {poi.label}"
+    if state.body_poi_id and poi.poi_id == state.body_poi_id:
+        return f"{label} (body)"
+    return label
+
+
+def _choose_poi(state: InvestigationState) -> ScenePOI | None:
+    unvisited = [poi for poi in state.scene_pois if poi.poi_id not in state.visited_poi_ids]
+    if not unvisited:
+        return None
+    print("Choose a scene area to inspect:")
+    for idx, poi in enumerate(unvisited, start=1):
+        print(f"{idx}) {_poi_display_label(state, poi)}")
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        return None
+    index = int(choice) - 1
+    if index < 0 or index >= len(unvisited):
+        return None
+    return unvisited[index]
 
 def _primary_role_tag(role_tags: list[RoleTag]) -> str:
     if RoleTag.WITNESS in role_tags:
@@ -202,6 +227,25 @@ def _lead_lines(state: InvestigationState) -> list[str]:
     return lines
 
 
+def _poi_lines(state: InvestigationState) -> list[str]:
+    if not state.scene_pois:
+        return ["(none)"]
+    lines: list[str] = []
+    for idx, poi in enumerate(state.scene_pois, start=1):
+        status = "visited" if poi.poi_id in state.visited_poi_ids else "unvisited"
+        lines.append(f"{idx}) {_poi_display_label(state, poi)} ({status})")
+    return lines
+
+
+def _poi_label_for(state: InvestigationState, poi_id: str | None) -> str | None:
+    if not poi_id:
+        return None
+    for poi in state.scene_pois:
+        if poi.poi_id == poi_id:
+            return _poi_display_label(state, poi)
+    return None
+
+
 def _supporting_evidence_lines(presentation, evidence_ids: list) -> list[str]:
     id_set = set(evidence_ids)
     lines: list[str] = []
@@ -251,6 +295,17 @@ def _choose_evidence(truth, presentation, known_ids: list) -> list:
             print(f"   Statement: {item.statement}")
             print(f"   {_witness_note(truth, item)}")
             print(f"   Confidence: {_format_confidence(item.confidence)}")
+        elif isinstance(item, ForensicObservation):
+            print(f"{idx}) {item.summary}")
+            poi_label = _poi_label_for(state, item.poi_id)
+            if poi_label:
+                print(f"   Location: {poi_label}")
+            print(f"   Observation: {item.observation}")
+            if item.tod_window:
+                print(f"   Estimated TOD: {_format_time_phrase(item.tod_window)}")
+            if item.stage_hint:
+                print(f"   Stage hint: {item.stage_hint}")
+            print(f"   Confidence: {_format_confidence(item.confidence)}")
         else:
             print(f"{idx}) {item.summary} ({item.evidence_type}, {item.confidence})")
     choice = input("> ").strip()
@@ -275,10 +330,13 @@ def _start_case(
     case_index: int,
     world: WorldState,
     case_id_override: str | None = None,
+    case_archetype: CaseArchetype | None = None,
 ):
     case_rng = base_rng.fork(f"case-{case_index}")
     case_id = case_id_override or f"case_{seed}_{case_index}"
-    truth, case_facts = generate_case(case_rng, case_id=case_id, world=world)
+    truth, case_facts = generate_case(
+        case_rng, case_id=case_id, world=world, case_archetype=case_archetype
+    )
     presentation = project_case(truth, case_rng.fork("projection"))
     location = truth.locations.get(case_facts["crime_scene_id"])
     district = location.district if location else "unknown"
@@ -295,6 +353,11 @@ def _start_case(
         start_time=next_state.time,
         deadline_delta=modifiers.lead_deadline_delta,
     )
+    scene_layout = case_facts.get("scene_layout") or {}
+    poi_rows = scene_layout.get("pois", []) or []
+    next_state.scene_pois = [ScenePOI(**row) for row in poi_rows if isinstance(row, dict)]
+    body_poi_id = case_facts.get("body_poi_id") or case_facts.get("primary_poi_id")
+    next_state.body_poi_id = body_poi_id or None
     _sync_people(world, truth, case_id, world.tick)
     if has_returning:
         modifiers = CaseStartModifiers(
@@ -320,11 +383,15 @@ def _start_case(
     )
 
 
-def _find_seed_with_observed(start_seed: int, max_tries: int) -> int | None:
+def _find_seed_with_observed(
+    start_seed: int, max_tries: int, case_archetype: CaseArchetype | None
+) -> int | None:
     for seed in range(start_seed, start_seed + max_tries):
         base_rng = Rng(seed)
         case_rng = base_rng.fork("case-1")
-        truth, _ = generate_case(case_rng, case_id=f"case_{seed}_1")
+        truth, _ = generate_case(
+            case_rng, case_id=f"case_{seed}_1", case_archetype=case_archetype
+        )
         presentation = project_case(truth, case_rng.fork("projection"))
         for item in presentation.evidence:
             observed = getattr(item, "observed_person_ids", None)
@@ -333,11 +400,16 @@ def _find_seed_with_observed(start_seed: int, max_tries: int) -> int | None:
     return None
 
 
-def _run_smoke(seed: int, case_id: str | None) -> None:
+def _run_smoke(seed: int, case_id: str | None, case_archetype: CaseArchetype | None) -> None:
     base_rng = Rng(seed)
     world = WorldState()
     truth, presentation, state, board, location_id, item_id, _, _, _ = _start_case(
-        base_rng, seed, 1, world, case_id_override=case_id
+        base_rng,
+        seed,
+        1,
+        world,
+        case_id_override=case_id,
+        case_archetype=case_archetype,
     )
     print(f"[smoke] Case {truth.case_id} started.")
     witness = next(
@@ -346,7 +418,11 @@ def _run_smoke(seed: int, case_id: str | None) -> None:
     if witness:
         interview(truth, presentation, state, witness.id, location_id)
     request_cctv(truth, presentation, state, location_id)
-    visit_scene(truth, presentation, state, location_id)
+    if state.scene_pois:
+        poi = state.scene_pois[0]
+        visit_scene(truth, presentation, state, location_id, poi_id=poi.poi_id, poi_label=poi.label)
+    else:
+        visit_scene(truth, presentation, state, location_id)
     board.sync_from_state(state)
     evidence_ids = list(board.known_evidence_ids)
     observed_id = _observed_suspect_id(presentation, evidence_ids)
@@ -389,6 +465,13 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=config.SEED)
     parser.add_argument("--case-id", type=str, default=None)
     parser.add_argument(
+        "--case-archetype",
+        type=str,
+        choices=[c.value for c in CaseArchetype],
+        default=None,
+        help="Force a case archetype (e.g., pattern or character).",
+    )
+    parser.add_argument(
         "--world-db",
         type=str,
         default=str(ROOT / "data" / "world_state.db"),
@@ -416,17 +499,18 @@ def main() -> None:
         help="How many seeds to scan for smoke mode.",
     )
     args = parser.parse_args()
+    case_archetype = CaseArchetype(args.case_archetype) if args.case_archetype else None
 
     if args.smoke:
         seed = args.seed
         if args.smoke_find:
-            found = _find_seed_with_observed(args.seed, args.smoke_tries)
+            found = _find_seed_with_observed(args.seed, args.smoke_tries, case_archetype)
             if found is None:
                 print("[smoke] No seed found with observed evidence.")
                 return
             seed = found
             print(f"[smoke] Using seed {seed}.")
-        _run_smoke(seed, args.case_id)
+        _run_smoke(seed, args.case_id, case_archetype)
         return
 
     world_store = None
@@ -439,7 +523,12 @@ def main() -> None:
     case_index = 1
     case_start_tick = world.tick
     truth, presentation, state, board, location_id, item_id, district, location_name, modifiers = _start_case(
-        base_rng, args.seed, case_index, world, case_id_override=args.case_id
+        base_rng,
+        args.seed,
+        case_index,
+        world,
+        case_id_override=args.case_id,
+        case_archetype=case_archetype,
     )
 
     print(
@@ -463,6 +552,9 @@ def main() -> None:
         print("Leads:")
         for line in _lead_lines(state):
             print(f"- {line}")
+        print("Scene POIs:")
+        for line in _poi_lines(state):
+            print(f"- {line}")
         print("1) Visit scene")
         print("2) Interview witness")
         print("3) Request CCTV")
@@ -474,8 +566,46 @@ def main() -> None:
         if choice == "q":
             break
 
-        if choice == "1":
-            result = visit_scene(truth, presentation, state, location_id)
+    if choice == "1":
+            body_poi = None
+            if state.body_poi_id:
+                for poi in state.scene_pois:
+                    if (
+                        poi.poi_id == state.body_poi_id
+                        and poi.poi_id not in state.visited_poi_ids
+                    ):
+                        body_poi = poi
+                        break
+            auto_body = False
+            if body_poi:
+                auto_body = True
+                result = visit_scene(
+                    truth,
+                    presentation,
+                    state,
+                    location_id,
+                    poi_id=body_poi.poi_id,
+                    poi_label=_poi_display_label(state, body_poi),
+                )
+            else:
+                poi = _choose_poi(state)
+                if poi:
+                    result = visit_scene(
+                        truth,
+                        presentation,
+                        state,
+                        location_id,
+                        poi_id=poi.poi_id,
+                        poi_label=_poi_display_label(state, poi),
+                    )
+                else:
+                    result = visit_scene(truth, presentation, state, location_id)
+            if auto_body and any(
+                poi.poi_id not in state.visited_poi_ids for poi in state.scene_pois
+            ):
+                result.notes.append(
+                    "Other scene areas remain; visit the scene again to inspect another area."
+                )
         elif choice == "2":
             selection = _choose_person(truth, RoleTag.WITNESS)
             if not selection:
@@ -549,6 +679,17 @@ def main() -> None:
                     print(f"  Statement: {item.statement}")
                     print(f"  {_witness_note(truth, item)}")
                     print(f"  Confidence: {_format_confidence(item.confidence)}")
+                elif isinstance(item, ForensicObservation):
+                    print(f"- New evidence: {item.summary}")
+                    poi_label = _poi_label_for(state, item.poi_id)
+                    if poi_label:
+                        print(f"  Location: {poi_label}")
+                    print(f"  Observation: {item.observation}")
+                    if item.tod_window:
+                        print(f"  Estimated TOD: {_format_time_phrase(item.tod_window)}")
+                    if item.stage_hint:
+                        print(f"  Stage hint: {item.stage_hint}")
+                    print(f"  Confidence: {_format_confidence(item.confidence)}")
                 else:
                     print(f"- New evidence: {item.summary} ({item.evidence_type}, {item.confidence})")
                 if isinstance(item, WitnessStatement):
@@ -595,7 +736,11 @@ def main() -> None:
             case_index += 1
             case_start_tick = world.tick
             truth, presentation, state, board, location_id, item_id, district, location_name, modifiers = _start_case(
-                base_rng, args.seed, case_index, world
+                base_rng,
+                args.seed,
+                case_index,
+                world,
+                case_archetype=case_archetype,
             )
             print(
                 f"New case {truth.case_id} started. "

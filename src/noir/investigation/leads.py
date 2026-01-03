@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from noir.domain.enums import ConfidenceBand, EvidenceType
 from noir.investigation.results import InvestigationState
-from noir.presentation.evidence import CCTVReport, ForensicsResult, WitnessStatement
+from noir.presentation.evidence import CCTVReport, ForensicObservation, ForensicsResult, WitnessStatement
 
 
 class LeadStatus(StrEnum):
@@ -119,11 +119,15 @@ def apply_lead_decay(lead: Lead, items: list) -> list[str]:
         return ["CCTV lead expired; only partial footage remains."]
     if lead.evidence_type == EvidenceType.FORENSICS:
         for item in items:
-            if not isinstance(item, ForensicsResult):
+            if not isinstance(item, (ForensicsResult, ForensicObservation)):
                 continue
             item.confidence = ConfidenceBand.WEAK
-            item.summary = "Forensics result (inconclusive)"
-            item.method_category = "unknown"
-            item.finding = "The lab could not reach a firm conclusion."
+            if isinstance(item, ForensicsResult):
+                item.summary = "Forensics result (inconclusive)"
+                item.method_category = "unknown"
+                item.finding = "The lab could not reach a firm conclusion."
+            else:
+                item.summary = "Forensic observation (inconclusive)"
+                item.observation = "The observation is too degraded to support a clear conclusion."
         return ["Forensics lead expired; the lab report is inconclusive."]
     return []

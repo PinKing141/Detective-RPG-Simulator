@@ -9,6 +9,7 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from noir import config
+from noir.cases.archetypes import CaseArchetype
 from noir.ui.app import Phase05App
 
 
@@ -16,6 +17,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Phase 0.5 Textual wrapper.")
     parser.add_argument("--seed", type=int, default=config.SEED)
     parser.add_argument("--case-id", type=str, default=None)
+    parser.add_argument(
+        "--case-archetype",
+        type=str,
+        choices=[c.value for c in CaseArchetype],
+        default=None,
+        help="Force a case archetype (e.g., pattern or character).",
+    )
     parser.add_argument(
         "--world-db",
         type=str,
@@ -30,7 +38,13 @@ def main() -> None:
     args = parser.parse_args()
 
     world_db = None if args.no_world_db else Path(args.world_db)
-    app = Phase05App(seed=args.seed, case_id=args.case_id, world_db=world_db)
+    case_archetype = CaseArchetype(args.case_archetype) if args.case_archetype else None
+    app = Phase05App(
+        seed=args.seed,
+        case_id=args.case_id,
+        world_db=world_db,
+        case_archetype=case_archetype,
+    )
     app.run()
 
 

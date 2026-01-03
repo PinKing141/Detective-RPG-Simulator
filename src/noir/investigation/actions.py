@@ -72,6 +72,8 @@ def visit_scene(
     presentation: PresentationCase,
     state: InvestigationState,
     location_id: UUID,
+    poi_id: str | None = None,
+    poi_label: str | None = None,
 ) -> ActionResult:
     blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(state, ActionType.VISIT_SCENE)
     if blocked:
@@ -88,18 +90,30 @@ def visit_scene(
         EventKind.INVESTIGATE_SCENE,
         state.time,
         location_id,
-        metadata={"action": "visit_scene"},
+        metadata={"action": "visit_scene", "poi_id": str(poi_id) if poi_id else ""},
     )
     notes = update_lead_statuses(state)
-    revealed = _reveal(state, presentation, lambda item: item.evidence_type == EvidenceType.FORENSICS)
+    if poi_id:
+        state.visited_poi_ids.add(poi_id)
+    revealed = _reveal(
+        state,
+        presentation,
+        lambda item: item.evidence_type == EvidenceType.FORENSICS
+        and item.source == "Scene Unit"
+        and (item.poi_id == poi_id),
+    )
     lead = lead_for_type(state, EvidenceType.FORENSICS)
     if lead and lead.status == LeadStatus.EXPIRED and revealed:
         notes.extend(apply_lead_decay(lead, revealed))
-    elif revealed:
+    elif revealed and any(item.source == "Forensics Lab" for item in revealed):
         mark_lead_resolved(state, EvidenceType.FORENSICS)
     summary = "You document the scene and collect trace evidence."
+    if poi_label:
+        summary = f"You document the {poi_label}."
     if not revealed:
         summary = "The scene yields no new trace evidence."
+        if poi_label:
+            summary = f"The {poi_label} yields no new trace evidence."
     return ActionResult(
         action=ActionType.VISIT_SCENE,
         outcome=ActionOutcome.SUCCESS,
@@ -237,7 +251,12 @@ def submit_forensics(
         metadata=metadata,
     )
     notes = update_lead_statuses(state)
-    revealed = _reveal(state, presentation, lambda item: item.evidence_type == EvidenceType.FORENSICS)
+    revealed = _reveal(
+        state,
+        presentation,
+        lambda item: item.evidence_type == EvidenceType.FORENSICS
+        and item.source == "Forensics Lab",
+    )
     lead = lead_for_type(state, EvidenceType.FORENSICS)
     if lead and lead.status == LeadStatus.EXPIRED and revealed:
         notes.extend(apply_lead_decay(lead, revealed))

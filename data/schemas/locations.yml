@@ -1,0 +1,725 @@
+version: 1
+description: "Location archetypes for witness presence and evidence defaults."
+time_buckets: [morning, afternoon, evening, midnight]
+scope_sets:
+  apartment_unit:
+    description: "Private unit with hallway exposure and adjacent neighbors."
+    zones: ["entry_hall", "living_room", "kitchen", "bedroom", "bathroom"]
+    neighbor_slots:
+      - id: "adjacent_unit"
+        count: 1
+        lead_type: "neighbor_witness"
+        hearing_bias: 0.6
+        witness_roles:
+          resident: 0.7
+          visitor: 0.2
+          passerby: 0.1
+      - id: "corridor"
+        count: 1
+        lead_type: "hall_witness"
+        hearing_bias: 0.3
+        witness_roles:
+          resident: 0.5
+          passerby: 0.3
+          maintenance: 0.2
+
+  apartment_common:
+    description: "Shared residential circulation with unit adjacency."
+    zones: ["corridor", "entry_hall"]
+    neighbor_slots:
+      - id: "adjacent_unit"
+        count: 2
+        lead_type: "neighbor_witness"
+        hearing_bias: 0.4
+        witness_roles:
+          resident: 0.7
+          visitor: 0.2
+          passerby: 0.1
+      - id: "entry_front"
+        count: 1
+        lead_type: "entry_witness"
+        hearing_bias: 0.2
+        witness_roles:
+          passerby: 0.6
+          resident: 0.4
+
+  hotel_property:
+    description: "Room with corridor and lobby exposure."
+    zones: ["room", "bathroom", "corridor", "lobby"]
+    neighbor_slots:
+      - id: "adjacent_room"
+        count: 1
+        lead_type: "adjacent_guest"
+        hearing_bias: 0.5
+        witness_roles:
+          guest: 0.6
+          staff: 0.3
+          passerby: 0.1
+      - id: "corridor"
+        count: 1
+        lead_type: "corridor_witness"
+        hearing_bias: 0.4
+        witness_roles:
+          guest: 0.5
+          staff: 0.3
+          security: 0.2
+
+  retail_small:
+    description: "Single-room retail with back area."
+    zones: ["sales_floor", "counter", "back_room", "entrance"]
+    neighbor_slots:
+      - id: "street_front"
+        count: 1
+        lead_type: "passerby_witness"
+        hearing_bias: 0.2
+        witness_roles:
+          passerby: 0.7
+          customer: 0.3
+
+  nightlife:
+    description: "Loud public room with back-of-house."
+    zones: ["public_floor", "bar_counter", "back_room", "side_exit"]
+    neighbor_slots:
+      - id: "street_front"
+        count: 1
+        lead_type: "outside_witness"
+        hearing_bias: 0.2
+        witness_roles:
+          passerby: 0.6
+          patron: 0.4
+
+  outdoor_narrow:
+    description: "Confined outdoor space with limited sightlines."
+    zones: ["alley_segment", "service_door", "fire_escape"]
+    neighbor_slots:
+      - id: "adjacent_building"
+        count: 1
+        lead_type: "neighbor_window"
+        hearing_bias: 0.3
+        witness_roles:
+          resident: 0.6
+          passerby: 0.4
+
+  outdoor_open:
+    description: "Open outdoor area with diffuse witnesses."
+    zones: ["open_ground", "path_edge"]
+    neighbor_slots:
+      - id: "street_front"
+        count: 1
+        lead_type: "passerby_witness"
+        hearing_bias: 0.2
+        witness_roles:
+          passerby: 0.7
+          resident: 0.3
+
+  transit_stop:
+    description: "Platform or stop with entry points."
+    zones: ["platform", "shelter", "entry_gate"]
+    neighbor_slots:
+      - id: "street_front"
+        count: 1
+        lead_type: "commuter_witness"
+        hearing_bias: 0.3
+        witness_roles:
+          commuter: 0.7
+          passerby: 0.3
+
+  public_institution:
+    description: "Lobby with restricted corridors."
+    zones: ["lobby", "corridor", "security_desk", "service_area"]
+    neighbor_slots:
+      - id: "entry_front"
+        count: 1
+        lead_type: "entry_witness"
+        hearing_bias: 0.2
+        witness_roles:
+          staff: 0.5
+          visitor: 0.3
+          security: 0.2
+
+  industrial_large:
+    description: "Large interior with loading access."
+    zones: ["warehouse_floor", "loading_dock", "office"]
+    neighbor_slots:
+      - id: "yard"
+        count: 1
+        lead_type: "driver_witness"
+        hearing_bias: 0.2
+        witness_roles:
+          driver: 0.6
+          staff: 0.4
+
+zone_templates:
+  entry_hall:
+    display_name: "Entry Hall"
+    tags: ["threshold", "interior"]
+    audibility: 0.4
+    poi_templates: ["door", "threshold", "light_switch", "floor_area"]
+
+  living_room:
+    display_name: "Living Room"
+    tags: ["residential", "interior"]
+    audibility: 0.5
+    poi_templates: ["sofa", "table", "window", "floor_area", "shelf"]
+
+  kitchen:
+    display_name: "Kitchen"
+    tags: ["residential", "interior"]
+    audibility: 0.4
+    poi_templates: ["counter", "sink", "fridge", "bin", "floor_area"]
+
+  bedroom:
+    display_name: "Bedroom"
+    tags: ["residential", "private"]
+    audibility: 0.3
+    poi_templates: ["bed", "nightstand", "dresser", "window", "floor_area"]
+
+  bathroom:
+    display_name: "Bathroom"
+    tags: ["residential", "private"]
+    audibility: 0.2
+    poi_templates: ["sink", "tub", "mirror", "floor_area"]
+
+  corridor:
+    display_name: "Corridor"
+    tags: ["circulation", "interior"]
+    audibility: 0.4
+    poi_templates: ["unit_door", "stairwell", "elevator", "mail_area"]
+
+  entrance:
+    display_name: "Entrance"
+    tags: ["threshold", "public"]
+    audibility: 0.5
+    poi_templates: ["door", "mat", "sign", "floor_area"]
+
+  counter:
+    display_name: "Counter"
+    tags: ["retail", "service"]
+    audibility: 0.6
+    poi_templates: ["register", "counter_top", "receipt_bin", "floor_area"]
+
+  room:
+    display_name: "Room"
+    tags: ["lodging", "private"]
+    audibility: 0.3
+    poi_templates: ["bed", "desk", "window", "door", "floor_area"]
+
+  lobby:
+    display_name: "Lobby"
+    tags: ["public", "interior"]
+    audibility: 0.5
+    poi_templates: ["reception", "seating", "entrance", "security_desk"]
+
+  security_desk:
+    display_name: "Security Desk"
+    tags: ["security", "public"]
+    audibility: 0.4
+    poi_templates: ["desk", "monitor", "logbook", "floor_area"]
+
+  service_area:
+    display_name: "Service Area"
+    tags: ["service", "private"]
+    audibility: 0.3
+    poi_templates: ["supply_cart", "closet", "rear_exit", "floor_area"]
+
+  sales_floor:
+    display_name: "Sales Floor"
+    tags: ["retail", "public"]
+    audibility: 0.5
+    poi_templates: ["aisle", "counter", "cooler", "entrance"]
+
+  back_room:
+    display_name: "Back Room"
+    tags: ["service", "private"]
+    audibility: 0.2
+    poi_templates: ["storage", "sink", "rear_exit", "floor_area"]
+
+  bar_counter:
+    display_name: "Bar Counter"
+    tags: ["nightlife", "service"]
+    audibility: 0.7
+    poi_templates: ["bar_top", "bottle_rack", "till", "floor_area"]
+
+  side_exit:
+    display_name: "Side Exit"
+    tags: ["threshold", "nightlife"]
+    audibility: 0.4
+    poi_templates: ["door", "alley", "step", "floor_area"]
+
+  public_floor:
+    display_name: "Public Floor"
+    tags: ["public", "nightlife"]
+    audibility: 0.7
+    poi_templates: ["bar_counter", "booth", "restroom", "side_exit"]
+
+  alley_segment:
+    display_name: "Alley Segment"
+    tags: ["outdoor", "transit"]
+    audibility: 0.2
+    poi_templates: ["dumpsters", "service_door", "fire_escape", "fence_gap"]
+
+  service_door:
+    display_name: "Service Door"
+    tags: ["threshold", "service"]
+    audibility: 0.2
+    poi_templates: ["door", "lock", "handle", "floor_area"]
+
+  fire_escape:
+    display_name: "Fire Escape"
+    tags: ["outdoor", "vertical"]
+    audibility: 0.2
+    poi_templates: ["ladder", "landing", "railing", "floor_area"]
+
+  platform:
+    display_name: "Platform"
+    tags: ["transit", "outdoor"]
+    audibility: 0.6
+    poi_templates: ["shelter", "bench", "ticket_machine", "entry_gate"]
+
+  shelter:
+    display_name: "Shelter"
+    tags: ["transit", "outdoor"]
+    audibility: 0.5
+    poi_templates: ["bench", "poster", "glass_panel", "floor_area"]
+
+  entry_gate:
+    display_name: "Entry Gate"
+    tags: ["transit", "threshold"]
+    audibility: 0.4
+    poi_templates: ["gate", "reader", "turnstile", "floor_area"]
+
+  open_ground:
+    display_name: "Open Ground"
+    tags: ["outdoor", "open"]
+    audibility: 0.3
+    poi_templates: ["bench", "path", "treeline", "sign", "ground"]
+
+  path_edge:
+    display_name: "Path Edge"
+    tags: ["outdoor", "transit"]
+    audibility: 0.2
+    poi_templates: ["path", "lamp_post", "fence", "trash_bin"]
+
+  warehouse_floor:
+    display_name: "Warehouse Floor"
+    tags: ["industrial", "interior"]
+    audibility: 0.5
+    poi_templates: ["storage_row", "loading_dock", "office", "rear_exit"]
+
+  loading_dock:
+    display_name: "Loading Dock"
+    tags: ["industrial", "service"]
+    audibility: 0.4
+    poi_templates: ["dock_edge", "bay_door", "pallet", "floor_area"]
+
+  office:
+    display_name: "Office"
+    tags: ["industrial", "interior"]
+    audibility: 0.3
+    poi_templates: ["desk", "cabinet", "window", "floor_area"]
+archetypes:
+  - id: hotel
+    display_name: "Hotel"
+    access_level: "semi_public"
+    tags: ["lodging", "commercial"]
+    scope_set: "hotel_property"
+    presence_curve:
+      morning: 0.2
+      afternoon: 0.4
+      evening: 0.7
+      midnight: 0.3
+    witness_roles:
+      staff: 0.45
+      guest: 0.35
+      security: 0.1
+      passerby: 0.1
+    visibility:
+      lighting: 0.7
+      occlusion: 0.3
+      noise: 0.4
+    surveillance:
+      cctv: 0.75
+      retention_hours: 48
+      angle_quality: 0.6
+    logs: ["keycard", "guest_register", "front_desk_calls"]
+    poi_templates: ["lobby", "front_desk", "corridor", "elevator", "service_stairs", "room_door"]
+
+  - id: motel
+    display_name: "Motel"
+    access_level: "semi_public"
+    tags: ["lodging", "roadside"]
+    scope_set: "hotel_property"
+    presence_curve:
+      morning: 0.1
+      afternoon: 0.3
+      evening: 0.5
+      midnight: 0.2
+    witness_roles:
+      clerk: 0.4
+      guest: 0.3
+      passerby: 0.2
+      resident: 0.1
+    visibility:
+      lighting: 0.5
+      occlusion: 0.4
+      noise: 0.3
+    surveillance:
+      cctv: 0.4
+      retention_hours: 24
+      angle_quality: 0.4
+    logs: ["guest_register", "receipt"]
+    poi_templates: ["front_office", "parking_row", "walkway", "room_door", "stairwell"]
+
+  - id: corner_store
+    display_name: "Corner Store"
+    access_level: "public"
+    tags: ["commercial", "retail"]
+    scope_set: "retail_small"
+    presence_curve:
+      morning: 0.6
+      afternoon: 0.8
+      evening: 0.6
+      midnight: 0.3
+    witness_roles:
+      cashier: 0.45
+      customer: 0.4
+      passerby: 0.15
+    visibility:
+      lighting: 0.8
+      occlusion: 0.2
+      noise: 0.3
+    surveillance:
+      cctv: 0.85
+      retention_hours: 72
+      angle_quality: 0.7
+    logs: ["receipt", "register_log"]
+    poi_templates: ["counter", "aisle", "entrance", "cooler", "back_room"]
+
+  - id: alley
+    display_name: "Alley"
+    access_level: "public"
+    tags: ["outdoor", "transit"]
+    scope_set: "outdoor_narrow"
+    presence_curve:
+      morning: 0.05
+      afternoon: 0.1
+      evening: 0.2
+      midnight: 0.1
+    witness_roles:
+      passerby: 0.7
+      resident: 0.2
+      security: 0.1
+    visibility:
+      lighting: 0.2
+      occlusion: 0.6
+      noise: 0.3
+    surveillance:
+      cctv: 0.1
+      retention_hours: 12
+      angle_quality: 0.2
+    logs: []
+    poi_templates: ["dumpsters", "service_door", "fire_escape", "stairwell", "fence_gap"]
+
+  - id: bar
+    display_name: "Bar"
+    access_level: "public"
+    tags: ["commercial", "nightlife"]
+    scope_set: "nightlife"
+    presence_curve:
+      morning: 0.1
+      afternoon: 0.4
+      evening: 0.9
+      midnight: 0.6
+    witness_roles:
+      patron: 0.6
+      staff: 0.3
+      passerby: 0.1
+    visibility:
+      lighting: 0.5
+      occlusion: 0.4
+      noise: 0.8
+    surveillance:
+      cctv: 0.5
+      retention_hours: 48
+      angle_quality: 0.5
+    logs: ["receipt", "card_tab"]
+    poi_templates: ["bar_counter", "booth", "back_door", "restroom", "side_alcove"]
+
+  - id: transit_stop
+    display_name: "Transit Stop"
+    access_level: "public"
+    tags: ["transit", "outdoor"]
+    scope_set: "transit_stop"
+    presence_curve:
+      morning: 0.7
+      afternoon: 0.8
+      evening: 0.6
+      midnight: 0.3
+    witness_roles:
+      commuter: 0.6
+      driver: 0.15
+      security: 0.1
+      passerby: 0.15
+    visibility:
+      lighting: 0.6
+      occlusion: 0.3
+      noise: 0.5
+    surveillance:
+      cctv: 0.8
+      retention_hours: 72
+      angle_quality: 0.6
+    logs: ["tap_log", "schedule_log"]
+    poi_templates: ["platform", "shelter", "entry_gate", "ticket_machine", "track_edge"]
+
+  - id: office_lobby
+    display_name: "Office Lobby"
+    access_level: "semi_public"
+    tags: ["commercial", "corporate"]
+    scope_set: "public_institution"
+    presence_curve:
+      morning: 0.9
+      afternoon: 0.7
+      evening: 0.3
+      midnight: 0.1
+    witness_roles:
+      security: 0.35
+      staff: 0.35
+      visitor: 0.2
+      passerby: 0.1
+    visibility:
+      lighting: 0.8
+      occlusion: 0.2
+      noise: 0.3
+    surveillance:
+      cctv: 0.9
+      retention_hours: 168
+      angle_quality: 0.7
+    logs: ["access_badge", "visitor_log"]
+    poi_templates: ["reception", "security_desk", "elevator_bank", "badge_gate"]
+
+  - id: apartment_hall
+    display_name: "Apartment Hall"
+    access_level: "semi_public"
+    tags: ["residential"]
+    scope_set: "apartment_common"
+    presence_curve:
+      morning: 0.3
+      afternoon: 0.4
+      evening: 0.5
+      midnight: 0.3
+    witness_roles:
+      resident: 0.8
+      passerby: 0.1
+      maintenance: 0.1
+    visibility:
+      lighting: 0.4
+      occlusion: 0.5
+      noise: 0.3
+    surveillance:
+      cctv: 0.3
+      retention_hours: 24
+      angle_quality: 0.4
+    logs: ["door_cam", "access_badge"]
+    poi_templates: ["mail_area", "stairwell", "elevator", "unit_door"]
+
+  - id: parking_lot
+    display_name: "Parking Lot"
+    access_level: "public"
+    tags: ["transit", "commercial"]
+    scope_set: "outdoor_open"
+    presence_curve:
+      morning: 0.3
+      afternoon: 0.4
+      evening: 0.5
+      midnight: 0.4
+    witness_roles:
+      driver: 0.6
+      security: 0.2
+      passerby: 0.2
+    visibility:
+      lighting: 0.4
+      occlusion: 0.5
+      noise: 0.3
+    surveillance:
+      cctv: 0.4
+      retention_hours: 24
+      angle_quality: 0.4
+    logs: ["entry_log", "ticket_stub"]
+    poi_templates: ["pay_station", "entry_lane", "row", "stairwell"]
+
+  - id: park
+    display_name: "Park"
+    access_level: "public"
+    tags: ["outdoor", "recreation"]
+    scope_set: "outdoor_open"
+    presence_curve:
+      morning: 0.3
+      afternoon: 0.6
+      evening: 0.5
+      midnight: 0.2
+    witness_roles:
+      passerby: 0.7
+      resident: 0.2
+      vendor: 0.1
+    visibility:
+      lighting: 0.3
+      occlusion: 0.5
+      noise: 0.2
+    surveillance:
+      cctv: 0.1
+      retention_hours: 12
+      angle_quality: 0.2
+    logs: []
+    poi_templates: ["bench", "path", "playground", "treeline", "pond_edge"]
+
+  - id: warehouse
+    display_name: "Warehouse"
+    access_level: "private"
+    tags: ["industrial", "commercial"]
+    scope_set: "industrial_large"
+    presence_curve:
+      morning: 0.2
+      afternoon: 0.3
+      evening: 0.4
+      midnight: 0.2
+    witness_roles:
+      staff: 0.5
+      security: 0.3
+      driver: 0.2
+    visibility:
+      lighting: 0.5
+      occlusion: 0.4
+      noise: 0.6
+    surveillance:
+      cctv: 0.6
+      retention_hours: 72
+      angle_quality: 0.5
+    logs: ["access_badge", "loading_log"]
+    poi_templates: ["loading_dock", "storage_row", "office", "rear_exit"]
+
+  - id: hospital
+    display_name: "Hospital"
+    access_level: "semi_public"
+    tags: ["institution", "medical"]
+    scope_set: "public_institution"
+    presence_curve:
+      morning: 0.7
+      afternoon: 0.8
+      evening: 0.7
+      midnight: 0.5
+    witness_roles:
+      staff: 0.5
+      patient: 0.3
+      security: 0.1
+      visitor: 0.1
+    visibility:
+      lighting: 0.8
+      occlusion: 0.2
+      noise: 0.5
+    surveillance:
+      cctv: 0.8
+      retention_hours: 168
+      angle_quality: 0.7
+    logs: ["access_badge", "visitor_log", "intake_log"]
+    poi_templates: ["lobby", "nurse_station", "corridor", "waiting_area"]
+
+  - id: school
+    display_name: "School"
+    access_level: "semi_public"
+    tags: ["institution", "education"]
+    scope_set: "public_institution"
+    presence_curve:
+      morning: 0.8
+      afternoon: 0.7
+      evening: 0.2
+      midnight: 0.05
+    witness_roles:
+      staff: 0.4
+      student: 0.4
+      security: 0.1
+      visitor: 0.1
+    visibility:
+      lighting: 0.7
+      occlusion: 0.3
+      noise: 0.5
+    surveillance:
+      cctv: 0.7
+      retention_hours: 168
+      angle_quality: 0.6
+    logs: ["attendance_log", "visitor_log", "access_badge"]
+    poi_templates: ["entrance", "hallway", "office", "courtyard"]
+
+  - id: gas_station
+    display_name: "Gas Station"
+    access_level: "public"
+    tags: ["commercial", "roadside"]
+    scope_set: "retail_small"
+    presence_curve:
+      morning: 0.5
+      afternoon: 0.6
+      evening: 0.5
+      midnight: 0.3
+    witness_roles:
+      clerk: 0.4
+      customer: 0.4
+      passerby: 0.2
+    visibility:
+      lighting: 0.7
+      occlusion: 0.3
+      noise: 0.4
+    surveillance:
+      cctv: 0.8
+      retention_hours: 72
+      angle_quality: 0.7
+    logs: ["receipt", "pump_log"]
+    poi_templates: ["pump_island", "cashier", "parking_spot", "side_door"]
+
+  - id: diner
+    display_name: "Diner"
+    access_level: "public"
+    tags: ["commercial", "food"]
+    scope_set: "retail_small"
+    presence_curve:
+      morning: 0.6
+      afternoon: 0.7
+      evening: 0.6
+      midnight: 0.3
+    witness_roles:
+      staff: 0.4
+      customer: 0.5
+      passerby: 0.1
+    visibility:
+      lighting: 0.7
+      occlusion: 0.2
+      noise: 0.4
+    surveillance:
+      cctv: 0.5
+      retention_hours: 48
+      angle_quality: 0.5
+    logs: ["receipt", "register_log"]
+    poi_templates: ["counter", "booth", "kitchen_door", "entrance"]
+
+  - id: apartment_unit
+    display_name: "Apartment Unit"
+    access_level: "private"
+    tags: ["residential", "interior"]
+    scope_set: "apartment_unit"
+    presence_curve:
+      morning: 0.2
+      afternoon: 0.3
+      evening: 0.6
+      midnight: 0.5
+    witness_roles:
+      resident: 0.7
+      visitor: 0.2
+      neighbor: 0.1
+    visibility:
+      lighting: 0.4
+      occlusion: 0.4
+      noise: 0.3
+    surveillance:
+      cctv: 0.1
+      retention_hours: 12
+      angle_quality: 0.2
+    logs: []
+    poi_templates: ["entry", "living_room", "bedroom", "kitchen", "bathroom"]
