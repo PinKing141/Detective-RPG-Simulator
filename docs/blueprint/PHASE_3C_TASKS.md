@@ -46,10 +46,10 @@ Phase 3C is not:
 - Optional partner/witness recurring lines (presentation only).
 
 ## Exit checklist
-- [ ] Same case reads differently under two gazes, with no evidence changes.
-- [ ] Episode titles, cold opens, and end tags render consistently.
-- [ ] Recaps draw from logged events only.
-- [ ] No new facts or validation modifiers exist.
+- [x] Same case reads differently under two gazes, with no evidence changes.
+- [x] Episode titles, cold opens, and end tags render consistently.
+- [x] Recaps draw from logged events only.
+- [x] No new facts or validation modifiers exist.
 
 Stop condition:
 If TV framing is present and non-invasive, stop.

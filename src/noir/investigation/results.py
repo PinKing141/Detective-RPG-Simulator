@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from noir.investigation.costs import ActionType
+from noir.investigation.interviews import InterviewState
 from noir.presentation.evidence import EvidenceItem
 from noir.presentation.knowledge import KnowledgeState
 from noir.locations.profiles import ScenePOI
@@ -30,10 +31,13 @@ class InvestigationState:
     scene_pois: list[ScenePOI] = field(default_factory=list)
     visited_poi_ids: set[str] = field(default_factory=set)
     body_poi_id: str | None = None
+    interviews: dict[str, InterviewState] = field(default_factory=dict)
+    neighbor_leads: list["NeighborLead"] = field(default_factory=list)
 
 
 if TYPE_CHECKING:
     from noir.investigation.leads import Lead
+    from noir.investigation.leads import NeighborLead
 
 
 @dataclass

@@ -24,10 +24,31 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
-from noir.investigation.leads import LeadStatus, build_leads
+from noir.investigation.interviews import InterviewApproach, InterviewTheme
+from noir.investigation.leads import (
+    LeadStatus,
+    build_leads,
+    build_neighbor_leads,
+    format_neighbor_lead,
+)
 from noir.investigation.outcomes import TRUST_LIMIT, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.locations.profiles import ScenePOI
+from noir.narrative.gaze import (
+    GazeMode,
+    format_cctv_lines,
+    format_forensic_lines,
+    format_forensics_result_lines,
+    format_witness_lines,
+    gaze_label,
+)
+from noir.narrative.recaps import (
+    build_cold_open,
+    build_end_tag,
+    build_episode_title,
+    build_partner_line,
+    build_previously_on,
+)
 from noir.presentation.evidence import (
     CCTVReport,
     ForensicObservation,
@@ -94,6 +115,7 @@ class Phase05App(App):
         case_id: str | None = None,
         world_db: Path | None = None,
         case_archetype: CaseArchetype | None = None,
+        gaze_mode: GazeMode | None = None,
     ) -> None:
         super().__init__()
         self.seed = seed if seed is not None else config.SEED
@@ -104,6 +126,7 @@ class Phase05App(App):
         self.world = self.world_store.load_world_state() if self.world_store else WorldState()
         self.case_start_tick = self.world.tick
         self.case_archetype = case_archetype
+        self.gaze_mode = gaze_mode if gaze_mode is not None else GazeMode.FORENSIC
         self.district = "unknown"
         self.location_name = "unknown"
         self.case_modifiers = None
@@ -114,6 +137,7 @@ class Phase05App(App):
         self.last_result = None
         self.profile_lines: list[str] = []
         self._pending_briefing: list[str] = []
+        self._pending_intro: list[str] = []
         self._has_mounted = False
 
         self._start_case(self.case_index, case_id_override=self.case_id)
@@ -129,8 +153,12 @@ class Phase05App(App):
     def on_mount(self) -> None:
         self._refresh_header()
         self._refresh_detail(None)
-        self._write(f"Case {self.truth.case_id} started.")
         self._has_mounted = True
+        if self._pending_intro:
+            for line in self._pending_intro:
+                self._write(line)
+            self._pending_intro = []
+        self._write(f"Case {self.truth.case_id} started.")
         if self._pending_briefing:
             for line in self._pending_briefing:
                 self._write(line)
@@ -187,7 +215,8 @@ class Phase05App(App):
         time_line = (
             f"Case: {self.truth.case_id}  Investigation Time {self.state.time}/{TIME_LIMIT}  "
             f"Pressure {self.state.pressure}/{PRESSURE_LIMIT}  "
-            f"Trust {self.state.trust}/{TRUST_LIMIT}"
+            f"Trust {self.state.trust}/{TRUST_LIMIT}  "
+            f"Gaze {gaze_label(self.gaze_mode)}"
         )
         lines = [time_line]
         scene_mode = None
@@ -212,16 +241,46 @@ class Phase05App(App):
         lines: list[str] = []
         lines.append("Detail")
         lines.append(f"Evidence known: {len(self.state.knowledge.known_evidence)}/{len(self.presentation.evidence)}")
-        lines.append("Leads:")
-        lines.extend(self._lead_lines())
-        lines.append("Scene POIs:")
-        lines.extend(self._poi_lines())
-        lines.append("")
-        lines.append("Profiling summary:")
+        lead_lines = self._lead_lines()
+        if lead_lines and lead_lines != ["(none)"]:
+            lines.append(f"Leads ({len(lead_lines)})")
+            for line in lead_lines[:2]:
+                lines.append(f"- {line}")
+            if len(lead_lines) > 2:
+                lines.append(f"- ... +{len(lead_lines) - 2} more")
+        neighbor_lines = self._neighbor_lead_lines()
+        if neighbor_lines and neighbor_lines != ["(none)"]:
+            lines.append(f"Neighbor leads ({len(neighbor_lines)})")
+            for line in neighbor_lines[:2]:
+                lines.append(f"- {line}")
+            if len(neighbor_lines) > 2:
+                lines.append(f"- ... +{len(neighbor_lines) - 2} more")
+        if self.state.scene_pois:
+            lines.append(f"Scene POIs ({len(self.state.scene_pois)})")
+            body_line = None
+            for poi in self.state.scene_pois:
+                if poi.poi_id == self.state.body_poi_id:
+                    status = "visited" if poi.poi_id in self.state.visited_poi_ids else "unvisited"
+                    body_line = f"{self._poi_display_line(poi)} ({status})"
+                    break
+            shown = 0
+            if body_line:
+                lines.append(f"- {body_line}")
+                shown = 1
+            else:
+                for poi in self.state.scene_pois[:2]:
+                    status = "visited" if poi.poi_id in self.state.visited_poi_ids else "unvisited"
+                    lines.append(f"- {self._poi_display_line(poi)} ({status})")
+                    shown += 1
+            remaining = len(self.state.scene_pois) - shown
+            if remaining > 0:
+                lines.append(f"- ... +{remaining} more (use Visit scene to list)")
         if self.profile_lines:
-            lines.extend(self.profile_lines)
-        else:
-            lines.append("(none)")
+            lines.append("Profiling summary")
+            for line in self.profile_lines[:4]:
+                lines.append(line)
+            if len(self.profile_lines) > 4:
+                lines.append(f"... +{len(self.profile_lines) - 4} more")
         last_result = result or self.last_result
         if last_result is not None:
             lines.append("")
@@ -229,22 +288,28 @@ class Phase05App(App):
             lines.append(last_result.summary)
             for note in last_result.notes:
                 lines.append(f"- {note}")
-        lines.append("")
-        lines.append("Evidence details:")
         known_ids = list(self.state.knowledge.known_evidence)
-        if not known_ids:
-            lines.append("(none)")
-        else:
-            for idx, evidence_id in enumerate(known_ids, start=1):
+        if known_ids:
+            lines.append("")
+            lines.append(f"Evidence (known) ({len(known_ids)})")
+            for idx, evidence_id in enumerate(known_ids[:3], start=1):
                 item = next(
                     (e for e in self.presentation.evidence if e.id == evidence_id),
                     None,
                 )
                 if item is None:
                     continue
-                if idx > 1:
-                    lines.append("")
-                lines.extend(self._format_evidence_detail(idx, item))
+                lines.append(f"- {self._format_evidence(idx, item)}")
+            if len(known_ids) > 3:
+                lines.append(f"- ... +{len(known_ids) - 3} more")
+            selected = self._selected_evidence()
+            if selected is not None:
+                lines.append("")
+                lines.append("Selected evidence")
+                detail_lines = self._format_evidence_detail(1, selected)
+                if detail_lines and detail_lines[0].startswith("1) "):
+                    detail_lines[0] = detail_lines[0][3:]
+                lines.extend(detail_lines)
         detail.update("\n".join(lines))
 
     def _format_evidence(self, index: int, item) -> str:
@@ -252,28 +317,56 @@ class Phase05App(App):
 
     def _format_evidence_detail(self, index: int, item) -> list[str]:
         if isinstance(item, WitnessStatement):
-            lines = [
-                f"{index}) Witness statement",
-                f"Source: {item.source}",
-                f"Time: {self._format_time_phrase(item.reported_time_window)} (estimate)",
-                f"Statement: {item.statement}",
-            ]
-            note = self._witness_note(item)
-            if note:
-                lines.append(note)
-            lines.append(f"Confidence: {self._format_confidence(item.confidence)}")
+            lines = [f"{index}) Witness statement", f"Source: {item.source}"]
+            lines.extend(
+                format_witness_lines(
+                    self._format_time_phrase(item.reported_time_window),
+                    item.statement,
+                    self._witness_note(item),
+                    self._format_confidence(item.confidence),
+                    list(item.uncertainty_hooks),
+                    self.gaze_mode,
+                )
+            )
             return lines
         if isinstance(item, ForensicObservation):
             lines = [f"{index}) {item.summary}"]
             poi_label = self._poi_label_for(item.poi_id)
             if poi_label:
                 lines.append(f"Location: {poi_label}")
-            lines.append(f"Observation: {item.observation}")
-            if item.tod_window:
-                lines.append(f"Estimated TOD: {self._format_time_phrase(item.tod_window)}")
-            if item.stage_hint:
-                lines.append(f"Stage hint: {item.stage_hint}")
-            lines.append(f"Confidence: {self._format_confidence(item.confidence)}")
+            tod_phrase = self._format_time_phrase(item.tod_window) if item.tod_window else None
+            lines.extend(
+                format_forensic_lines(
+                    item.observation,
+                    self._format_confidence(item.confidence),
+                    tod_phrase,
+                    item.stage_hint,
+                    self.gaze_mode,
+                )
+            )
+            return lines
+        if isinstance(item, CCTVReport):
+            lines = [f"{index}) {item.summary}"]
+            lines.extend(
+                format_cctv_lines(
+                    item.summary,
+                    self._format_time_phrase(item.time_window),
+                    self._cctv_note(item),
+                    self._format_confidence(item.confidence),
+                    self.gaze_mode,
+                )
+            )
+            return lines
+        if isinstance(item, ForensicsResult):
+            lines = [f"{index}) {item.summary}"]
+            lines.extend(
+                format_forensics_result_lines(
+                    item.finding,
+                    item.method_category,
+                    self._format_confidence(item.confidence),
+                    self.gaze_mode,
+                )
+            )
             return lines
         lines = [self._format_evidence(index, item)]
         if isinstance(item, CCTVReport):
@@ -301,6 +394,23 @@ class Phase05App(App):
             ClaimType.BEHAVIOR: "Behavior aligns with the crime",
         }
         return mapping.get(claim, claim.value)
+
+    def _interview_approach_label(self, approach: InterviewApproach) -> str:
+        mapping = {
+            InterviewApproach.BASELINE: "Baseline (rapport)",
+            InterviewApproach.PRESSURE: "Pressure (challenge)",
+            InterviewApproach.THEME: "Theme framing",
+        }
+        return mapping.get(approach, approach.value)
+
+    def _interview_theme_label(self, theme: InterviewTheme) -> str:
+        mapping = {
+            InterviewTheme.BLAME_VICTIM: "Blame the victim",
+            InterviewTheme.CIRCUMSTANCE: "Blame the circumstances",
+            InterviewTheme.ALTRUISTIC: "Altruistic motive",
+            InterviewTheme.ACCIDENTAL: "Accidental outcome",
+        }
+        return mapping.get(theme, theme.value)
 
     def _format_hour(self, hour: int) -> str:
         value = hour % 24
@@ -397,14 +507,25 @@ class Phase05App(App):
             return f"{label} (body)"
         return label
 
+    def _poi_display_line(self, poi: ScenePOI) -> str:
+        label = self._poi_display_label(poi)
+        if poi.description:
+            return f"{label}: {poi.description}"
+        return label
+
     def _poi_lines(self) -> list[str]:
         if not self.state.scene_pois:
             return ["(none)"]
         lines: list[str] = []
         for idx, poi in enumerate(self.state.scene_pois, start=1):
             status = "visited" if poi.poi_id in self.state.visited_poi_ids else "unvisited"
-            lines.append(f"{idx}) {self._poi_display_label(poi)} ({status})")
+            lines.append(f"{idx}) {self._poi_display_line(poi)} ({status})")
         return lines
+
+    def _neighbor_lead_lines(self) -> list[str]:
+        if not self.state.neighbor_leads:
+            return ["(none)"]
+        return [format_neighbor_lead(lead) for lead in self.state.neighbor_leads]
 
     def _supporting_evidence_lines(self) -> list[str]:
         if self.board.hypothesis is None:
@@ -463,6 +584,7 @@ class Phase05App(App):
                     self.location_id,
                     poi_id=body_poi.poi_id,
                     poi_label=self._poi_display_label(body_poi),
+                    poi_description=body_poi.description,
                 )
                 if any(
                     poi.poi_id not in self.state.visited_poi_ids
@@ -480,7 +602,7 @@ class Phase05App(App):
                 self.prompt_state = PromptState(step="visit_poi", options=unvisited)
                 self._write("Choose a scene area to inspect:")
                 for idx, poi in enumerate(unvisited, start=1):
-                    self._write(f"{idx}) {self._poi_display_label(poi)}")
+                    self._write(f"{idx}) {self._poi_display_line(poi)}")
                 return
             result = visit_scene(self.truth, self.presentation, self.state, self.location_id)
             self._apply_action_result(result)
@@ -553,23 +675,52 @@ class Phase05App(App):
         for item in result.revealed:
             if isinstance(item, WitnessStatement):
                 self._write("- New evidence: Witness statement")
-                self._write(f"  Time: {self._format_time_phrase(item.reported_time_window)} (estimate)")
-                self._write(f"  Statement: {item.statement}")
-                note = self._witness_note(item)
-                if note:
-                    self._write(f"  {note}")
-                self._write(f"  Confidence: {self._format_confidence(item.confidence)}")
+                lines = format_witness_lines(
+                    self._format_time_phrase(item.reported_time_window),
+                    item.statement,
+                    self._witness_note(item),
+                    self._format_confidence(item.confidence),
+                    list(item.uncertainty_hooks),
+                    self.gaze_mode,
+                )
+                for line in lines:
+                    self._write(f"  {line}")
             elif isinstance(item, ForensicObservation):
                 self._write(f"- New evidence: {item.summary}")
                 poi_label = self._poi_label_for(item.poi_id)
                 if poi_label:
                     self._write(f"  Location: {poi_label}")
-                self._write(f"  Observation: {item.observation}")
-                if item.tod_window:
-                    self._write(f"  Estimated TOD: {self._format_time_phrase(item.tod_window)}")
-                if item.stage_hint:
-                    self._write(f"  Stage hint: {item.stage_hint}")
-                self._write(f"  Confidence: {self._format_confidence(item.confidence)}")
+                tod_phrase = self._format_time_phrase(item.tod_window) if item.tod_window else None
+                lines = format_forensic_lines(
+                    item.observation,
+                    self._format_confidence(item.confidence),
+                    tod_phrase,
+                    item.stage_hint,
+                    self.gaze_mode,
+                )
+                for line in lines:
+                    self._write(f"  {line}")
+            elif isinstance(item, CCTVReport):
+                self._write(f"- New evidence: {item.summary}")
+                lines = format_cctv_lines(
+                    item.summary,
+                    self._format_time_phrase(item.time_window),
+                    self._cctv_note(item),
+                    self._format_confidence(item.confidence),
+                    self.gaze_mode,
+                )
+                for line in lines:
+                    self._write(f"  {line}")
+            elif isinstance(item, ForensicsResult):
+                self._write(f"- New evidence: {item.summary}")
+                lines = format_forensics_result_lines(
+                    item.finding,
+                    item.method_category,
+                    self._format_confidence(item.confidence),
+                    self.gaze_mode,
+                )
+                for line in lines:
+                    self._write(f"  {line}")
             else:
                 self._write(f"- New evidence: {item.summary} ({item.evidence_type}, {item.confidence})")
         for note in result.notes:
@@ -617,6 +768,9 @@ class Phase05App(App):
             self.world_store.record_case(self.world.case_history[-1])
         for note in world_notes:
             self._write(f"- {note}")
+        end_rng = self.base_rng.fork(f"end-{self.case_index}")
+        for line in build_end_tag(end_rng, outcome.arrest_result.value):
+            self._write(line)
         self.case_index += 1
         self.case_start_tick = self.world.tick
         self._start_case(self.case_index)
@@ -638,6 +792,20 @@ class Phase05App(App):
         location = self.truth.locations.get(self.case_facts["crime_scene_id"])
         self.district = location.district if location else "unknown"
         self.location_name = location.name if location else "unknown"
+        intro_lines: list[str] = []
+        if case_index == 1:
+            intro_lines.extend(build_previously_on(self.world))
+        episode_rng = self.base_rng.fork(f"episode-{case_index}")
+        episode_title = build_episode_title(episode_rng, self.location_name, self.district)
+        intro_lines.append(f"Episode: {episode_title}")
+        intro_lines.extend(build_cold_open(episode_rng, self.location_name))
+        intro_lines.extend(build_partner_line(episode_rng))
+        if intro_lines:
+            if self._has_mounted:
+                for line in intro_lines:
+                    self._write(line)
+            else:
+                self._pending_intro = list(intro_lines)
         self.case_modifiers = self.world.case_start_modifiers(
             self.district, self.location_name
         )
@@ -659,6 +827,7 @@ class Phase05App(App):
         self.state.scene_pois = [ScenePOI(**row) for row in poi_rows if isinstance(row, dict)]
         body_poi_id = self.case_facts.get("body_poi_id") or self.case_facts.get("primary_poi_id")
         self.state.body_poi_id = body_poi_id or None
+        self.state.neighbor_leads = build_neighbor_leads(scene_layout)
         self.board = DeductionBoard()
         self.prompt_state = None
         self.selected_evidence_id = None
@@ -687,7 +856,15 @@ class Phase05App(App):
             self._write("No witness available.")
             return None
         if len(witnesses) == 1:
-            return interview(self.truth, self.presentation, self.state, witnesses[0].id, self.location_id)
+            self.prompt_state = PromptState(
+                step="interview_approach",
+                data={"witness_id": witnesses[0].id},
+                options=list(InterviewApproach),
+            )
+            self._write("Choose interview approach:")
+            for idx, approach in enumerate(self.prompt_state.options, start=1):
+                self._write(f"{idx}) {self._interview_approach_label(approach)}")
+            return None
         self.prompt_state = PromptState(step="interview_witness", options=witnesses)
         self._write("Choose a witness:")
         for idx, person in enumerate(witnesses, start=1):
@@ -719,8 +896,59 @@ class Phase05App(App):
                 self._write("Invalid choice.")
                 return
             person = self.prompt_state.options[selection]
+            self.prompt_state = PromptState(
+                step="interview_approach",
+                data={"witness_id": person.id},
+                options=list(InterviewApproach),
+            )
+            self._write("Choose interview approach:")
+            for idx, approach in enumerate(self.prompt_state.options, start=1):
+                self._write(f"{idx}) {self._interview_approach_label(approach)}")
+            return
+        if step == "interview_approach":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            approach = self.prompt_state.options[selection]
+            self.prompt_state.data["approach"] = approach
+            if approach == InterviewApproach.THEME:
+                self.prompt_state.step = "interview_theme"
+                self.prompt_state.options = list(InterviewTheme)
+                self._write("Choose framing theme:")
+                for idx, theme in enumerate(self.prompt_state.options, start=1):
+                    self._write(f"{idx}) {self._interview_theme_label(theme)}")
+                return
+            witness_id = self.prompt_state.data["witness_id"]
             self.prompt_state = None
-            result = interview(self.truth, self.presentation, self.state, person.id, self.location_id)
+            result = interview(
+                self.truth,
+                self.presentation,
+                self.state,
+                witness_id,
+                self.location_id,
+                approach=approach,
+            )
+            self._apply_action_result(result)
+            return
+        if step == "interview_theme":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            theme = self.prompt_state.options[selection]
+            witness_id = self.prompt_state.data["witness_id"]
+            approach = self.prompt_state.data.get("approach", InterviewApproach.THEME)
+            self.prompt_state = None
+            result = interview(
+                self.truth,
+                self.presentation,
+                self.state,
+                witness_id,
+                self.location_id,
+                approach=approach,
+                theme=theme,
+            )
             self._apply_action_result(result)
             return
         if step == "visit_poi":
@@ -737,6 +965,7 @@ class Phase05App(App):
                 self.location_id,
                 poi_id=poi.poi_id,
                 poi_label=self._poi_display_label(poi),
+                poi_description=poi.description,
             )
             self._apply_action_result(result)
             return
@@ -772,23 +1001,54 @@ class Phase05App(App):
             for idx, item in enumerate(evidence_items, start=1):
                 if isinstance(item, WitnessStatement):
                     self._write(f"{idx}) Witness statement")
-                    self._write(f"   Time: {self._format_time_phrase(item.reported_time_window)} (estimate)")
-                    self._write(f"   Statement: {item.statement}")
-                    note = self._witness_note(item)
-                    if note:
-                        self._write(f"   {note}")
-                    self._write(f"   Confidence: {self._format_confidence(item.confidence)}")
+                    lines = format_witness_lines(
+                        self._format_time_phrase(item.reported_time_window),
+                        item.statement,
+                        self._witness_note(item),
+                        self._format_confidence(item.confidence),
+                        list(item.uncertainty_hooks),
+                        self.gaze_mode,
+                    )
+                    for line in lines:
+                        self._write(f"   {line}")
                 elif isinstance(item, ForensicObservation):
                     self._write(f"{idx}) {item.summary}")
                     poi_label = self._poi_label_for(item.poi_id)
                     if poi_label:
                         self._write(f"   Location: {poi_label}")
-                    self._write(f"   Observation: {item.observation}")
-                    if item.tod_window:
-                        self._write(f"   Estimated TOD: {self._format_time_phrase(item.tod_window)}")
-                    if item.stage_hint:
-                        self._write(f"   Stage hint: {item.stage_hint}")
-                    self._write(f"   Confidence: {self._format_confidence(item.confidence)}")
+                    tod_phrase = (
+                        self._format_time_phrase(item.tod_window) if item.tod_window else None
+                    )
+                    lines = format_forensic_lines(
+                        item.observation,
+                        self._format_confidence(item.confidence),
+                        tod_phrase,
+                        item.stage_hint,
+                        self.gaze_mode,
+                    )
+                    for line in lines:
+                        self._write(f"   {line}")
+                elif isinstance(item, CCTVReport):
+                    self._write(f"{idx}) {item.summary}")
+                    lines = format_cctv_lines(
+                        item.summary,
+                        self._format_time_phrase(item.time_window),
+                        self._cctv_note(item),
+                        self._format_confidence(item.confidence),
+                        self.gaze_mode,
+                    )
+                    for line in lines:
+                        self._write(f"   {line}")
+                elif isinstance(item, ForensicsResult):
+                    self._write(f"{idx}) {item.summary}")
+                    lines = format_forensics_result_lines(
+                        item.finding,
+                        item.method_category,
+                        self._format_confidence(item.confidence),
+                        self.gaze_mode,
+                    )
+                    for line in lines:
+                        self._write(f"   {line}")
                 else:
                     self._write(f"{idx}) {item.summary} ({item.evidence_type}, {item.confidence})")
             return

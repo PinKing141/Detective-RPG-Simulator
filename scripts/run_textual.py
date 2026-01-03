@@ -10,6 +10,7 @@ sys.path.insert(0, str(SRC))
 
 from noir import config
 from noir.cases.archetypes import CaseArchetype
+from noir.narrative.gaze import GazeMode
 from noir.ui.app import Phase05App
 
 
@@ -23,6 +24,13 @@ def main() -> None:
         choices=[c.value for c in CaseArchetype],
         default=None,
         help="Force a case archetype (e.g., pattern or character).",
+    )
+    parser.add_argument(
+        "--gaze",
+        type=str,
+        choices=[g.value for g in GazeMode],
+        default=GazeMode.FORENSIC.value,
+        help="Presentation lens (forensic or behavioral).",
     )
     parser.add_argument(
         "--world-db",
@@ -39,11 +47,13 @@ def main() -> None:
 
     world_db = None if args.no_world_db else Path(args.world_db)
     case_archetype = CaseArchetype(args.case_archetype) if args.case_archetype else None
+    gaze_mode = GazeMode(args.gaze)
     app = Phase05App(
         seed=args.seed,
         case_id=args.case_id,
         world_db=world_db,
         case_archetype=case_archetype,
+        gaze_mode=gaze_mode,
     )
     app.run()
 

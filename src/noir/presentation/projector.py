@@ -91,6 +91,21 @@ def _rigor_stage(hours_since: int) -> str:
     return "Rigor is fading."
 
 
+def _tod_sigma(tags: list[str]) -> float:
+    sigma = 1.5
+    if "outdoor" in tags or "open" in tags:
+        sigma += 0.9
+    if "industrial" in tags or "service" in tags:
+        sigma += 0.5
+    if "public" in tags:
+        sigma += 0.3
+    if "private" in tags:
+        sigma -= 0.2
+    if "interior" in tags:
+        sigma -= 0.2
+    return _clamp(sigma, 0.8, 3.0)
+
+
 def _wound_class(method_category: str) -> str:
     if method_category == "blunt":
         return "laceration"
@@ -123,6 +138,14 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
     scene_layout = truth.case_meta.get("scene_layout") or {}
     scene_pois = scene_layout.get("pois", []) or []
     poi_ids = [poi.get("poi_id") for poi in scene_pois if poi.get("poi_id")]
+    poi_zone = {
+        poi.get("poi_id"): poi.get("zone_id") for poi in scene_pois if poi.get("poi_id")
+    }
+    poi_tags = {
+        poi.get("poi_id"): poi.get("tags", [])
+        for poi in scene_pois
+        if poi.get("poi_id")
+    }
     primary_poi_id = truth.case_meta.get("primary_poi_id")
     body_poi_id = truth.case_meta.get("body_poi_id") or primary_poi_id
     if not body_poi_id and poi_ids:
@@ -240,7 +263,19 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
         break
 
     if primary_poi_id:
-        tod_window = fuzz_time(kill_event.timestamp, sigma=1.5, rng=rng)
+        body_tags = list(poi_tags.get(body_poi_id, []))
+        if not body_tags and body_poi_id in poi_zone:
+            zone_id = poi_zone.get(body_poi_id)
+            body_tags = list(
+                profiles.get("zone_templates", {})
+                .get(zone_id, {})
+                .get("tags", [])
+            )
+        tod_window = fuzz_time(
+            kill_event.timestamp,
+            sigma=_tod_sigma(body_tags),
+            rng=rng,
+        )
         hours_since = max(1, discovery_time - kill_event.timestamp)
         evidence.append(
             ForensicObservation(
@@ -294,6 +329,29 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 observation=entry_observation,
             )
         )
+
+        extra_pois = [poi_id for poi_id in non_body_poi_ids if poi_id != entry_poi_id]
+        extra_notes = [
+            "Light scuffing suggests recent movement.",
+            "A faint smear indicates contact with a surface.",
+            "Dust displacement suggests something was moved.",
+            "Small debris points to hurried movement.",
+        ]
+        obs_rng = rng.fork("poi-trace")
+        obs_rng.shuffle(extra_pois)
+        for poi_id in extra_pois[:2]:
+            observation = obs_rng.choice(extra_notes)
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (trace)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=poi_id or primary_poi_id,
+                    observation=observation,
+                )
+            )
 
     if not cctv_added and not forensics_added:
         if cctv_available:

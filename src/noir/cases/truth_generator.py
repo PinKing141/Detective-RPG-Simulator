@@ -273,6 +273,8 @@ def generate_case(
                         "label": poi.label,
                         "zone_id": poi.zone_id,
                         "zone_label": poi.zone_label,
+                        "description": poi.description,
+                        "tags": list(poi.tags),
                     }
                     for poi in scene_layout.pois
                 ],

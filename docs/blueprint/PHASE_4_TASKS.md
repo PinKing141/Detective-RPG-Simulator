@@ -12,6 +12,17 @@ Phase 4 is not:
 
 Phase 4 only reads systems. It does not add new mechanics.
 
+Prerequisites:
+- Phase 3D establishes signature patterns and a tracker.
+- Phase 3E establishes a persistent offender with light adaptation.
+
+Nemesis scope rules:
+- Exactly one adaptive Nemesis at a time.
+- Up to two non-adaptive serial offenders may run concurrently as noise.
+- Copycats appear only after the Nemesis has been seen twice.
+- A new Nemesis replaces the old one only after capture, death, disappearance,
+  or a lost trail.
+
 ## 1) What Phase 4 is allowed to add
 
 ### A) Endings (plural, non-hierarchical)
@@ -61,9 +72,9 @@ The nemesis never defines the ending. The player's approach does.
 - Campaign state model (season progress, pressure, trust, arc flags).
 - Case queue and pacing rules (tension wave).
 - Nemesis arc controller (closing-in logic).
+- Detective identity metrics (DIM) and counterplay rules.
 - Endings system (early + final endings).
 - Epilogue generator (identity-based summary).
-- Episode framing (titles, cold opens, end tags, "Previously on...").
 - Save/load includes campaign + ending flags.
 
 ## 4) Ending taxonomy (behavioral axes, not scores)
@@ -122,7 +133,20 @@ Unlock one operation style for v1 (pick one):
 - warrant
 - raid
 
-## 8) Endgame operations framework (stakeout, warrant, bait, raid)
+## 8) Detective identity metrics (DIM) and counterplay
+
+DIM counters (counts and thresholds, not continuous stats):
+- Coercive: intimidation, forced entry, early arrest
+- Analytical: forensics, timeline analysis, corroboration
+- Social: rapport interviews, witness networks, soft pressure
+- Risky: acting before probable cause, skipping corroboration
+
+Rules:
+- A style becomes dominant only after 2 to 3 cases.
+- Nemesis counterplay triggers only when dominance is stable.
+- Counterplay examples: aggression feeder, forensic countermeasures.
+
+## 9) Endgame operations framework (stakeout, warrant, bait, raid)
 
 Unifying rule:
 Do not build four mini-games. Each operation is a wrapper around the same core pipeline:
@@ -227,7 +251,7 @@ Persistence hooks (minimal SQL fields to add to world storage):
 - warrants: warrant_id, case_id, warrant_type, target_person_id, target_location_id,
   status, scope_json, support_snapshot_json, issued_time
 
-## 9) Crime type expansion (optional, controlled)
+## 10) Crime type expansion (optional, controlled)
 If adding new crime types in Phase 4, they must reuse at least 70 percent of:
 - evidence classes
 - action set
@@ -241,7 +265,7 @@ Use families, not bespoke systems:
 
 Only truth generator and projector templates change. No new evidence classes.
 
-## 10) Ending engine (how it should work)
+## 11) Ending engine (how it should work)
 
 Step 1: Collect behavioral signals
 - arrest timing
@@ -284,24 +308,14 @@ Template:
 4) Nemesis reflection (optional)
 5) Closing line
 
-## 11) TV-style framing (lightweight, repeatable)
-
-Per case:
-- Episode title (S01E07 - The Quiet Street)
-- Cold open (2 to 4 lines)
-- End tag (1 to 3 lines)
-
-Per session:
-- Previously on... recap from last 3 to 6 logged events
-
 ## 12) Phase 4 ordered task list
 1. CampaignState model (season progress, pressure/trust, nemesis flags).
 2. Case queue and pacing (tension wave scheduling).
 3. Nemesis closing-in progress (pattern, narrowing, proof).
-4. Operations framework (warrant, stakeout, bait, raid).
-5. Endgame operation (pick one style first, add others as wrappers).
-6. Ending triggers + epilogue generator (early + final).
-7. TV framing (titles, recaps, end tags).
+4. DIM counters and nemesis counterplay traits.
+5. Operations framework (warrant, stakeout, bait, raid).
+6. Endgame operation (pick one style first, add others as wrappers).
+7. Ending triggers + epilogue generator (early + final).
 8. Save/load covers campaign + ending state.
 9. Optional crime family expansion (if needed).
 
@@ -312,7 +326,7 @@ Per session:
 - [ ] No new mechanics were added.
 - [ ] Players can disagree about whether they won.
 - [ ] A run has a clear beginning, escalation, and endgame.
-- [ ] Recaps and titles are present for each case.
+- [ ] Uses Phase 3C framing without expansion.
 - [ ] Any ending can be explained in-world without code references.
 
 Final rule:

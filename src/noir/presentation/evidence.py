@@ -28,6 +28,7 @@ class WitnessStatement(EvidenceItem):
     reported_time_window: Tuple[int, int]
     location_id: UUID
     observed_person_ids: list[UUID] = Field(default_factory=list)
+    uncertainty_hooks: list[str] = Field(default_factory=list)
 
 
 class CCTVReport(EvidenceItem):

@@ -24,11 +24,37 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
-from noir.investigation.leads import LeadStatus, build_leads
+from noir.investigation.interviews import InterviewApproach, InterviewTheme
+from noir.investigation.leads import (
+    LeadStatus,
+    build_leads,
+    build_neighbor_leads,
+    format_neighbor_lead,
+)
 from noir.investigation.outcomes import TRUST_LIMIT, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState
 from noir.locations.profiles import ScenePOI
-from noir.presentation.evidence import ForensicObservation, WitnessStatement
+from noir.narrative.gaze import (
+    GazeMode,
+    format_cctv_lines,
+    format_forensic_lines,
+    format_forensics_result_lines,
+    format_witness_lines,
+    gaze_label,
+)
+from noir.narrative.recaps import (
+    build_cold_open,
+    build_end_tag,
+    build_episode_title,
+    build_partner_line,
+    build_previously_on,
+)
+from noir.presentation.evidence import (
+    CCTVReport,
+    ForensicObservation,
+    ForensicsResult,
+    WitnessStatement,
+)
 from noir.presentation.projector import project_case
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
@@ -70,6 +96,45 @@ def _choose_claims() -> list[ClaimType]:
         if 0 <= idx < len(options):
             selected.append(options[idx])
     return list(dict.fromkeys(selected))
+
+
+def _choose_interview_approach() -> InterviewApproach | None:
+    options = list(InterviewApproach)
+    labels = {
+        InterviewApproach.BASELINE: "Baseline (rapport)",
+        InterviewApproach.PRESSURE: "Pressure (challenge)",
+        InterviewApproach.THEME: "Theme framing",
+    }
+    print("Choose interview approach:")
+    for idx, approach in enumerate(options, start=1):
+        print(f"{idx}) {labels.get(approach, approach.value)}")
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        return None
+    index = int(choice) - 1
+    if index < 0 or index >= len(options):
+        return None
+    return options[index]
+
+
+def _choose_interview_theme() -> InterviewTheme | None:
+    options = list(InterviewTheme)
+    labels = {
+        InterviewTheme.BLAME_VICTIM: "Blame the victim",
+        InterviewTheme.CIRCUMSTANCE: "Blame the circumstances",
+        InterviewTheme.ALTRUISTIC: "Altruistic motive",
+        InterviewTheme.ACCIDENTAL: "Accidental outcome",
+    }
+    print("Choose framing theme:")
+    for idx, theme in enumerate(options, start=1):
+        print(f"{idx}) {labels.get(theme, theme.value)}")
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        return None
+    index = int(choice) - 1
+    if index < 0 or index >= len(options):
+        return None
+    return options[index]
 
 
 def _observed_suspect_id(presentation, evidence_ids: list) -> object | None:
@@ -122,13 +187,20 @@ def _poi_display_label(state: InvestigationState, poi: ScenePOI) -> str:
     return label
 
 
+def _poi_display_line(state: InvestigationState, poi: ScenePOI) -> str:
+    label = _poi_display_label(state, poi)
+    if poi.description:
+        return f"{label}: {poi.description}"
+    return label
+
+
 def _choose_poi(state: InvestigationState) -> ScenePOI | None:
     unvisited = [poi for poi in state.scene_pois if poi.poi_id not in state.visited_poi_ids]
     if not unvisited:
         return None
     print("Choose a scene area to inspect:")
     for idx, poi in enumerate(unvisited, start=1):
-        print(f"{idx}) {_poi_display_label(state, poi)}")
+        print(f"{idx}) {_poi_display_line(state, poi)}")
     choice = input("> ").strip()
     if not choice.isdigit():
         return None
@@ -203,6 +275,11 @@ def _format_confidence(confidence) -> str:
     return mapping.get(value, value.capitalize())
 
 
+def _print_lines(lines: list[str], prefix: str = "") -> None:
+    for line in lines:
+        print(f"{prefix}{line}")
+
+
 def _witness_note(truth, item: WitnessStatement) -> str:
     if item.observed_person_ids:
         person_id = item.observed_person_ids[0]
@@ -210,6 +287,15 @@ def _witness_note(truth, item: WitnessStatement) -> str:
         name = person.name if person else "someone"
         return f"Detective note: Suggests proximity near the location ({name})."
     return "Detective note: Suggests activity near the location."
+
+
+def _cctv_note(truth, item: CCTVReport) -> str:
+    if item.observed_person_ids:
+        person_id = item.observed_person_ids[0]
+        person = truth.people.get(person_id)
+        name = person.name if person else "someone"
+        return f"Detective note: Footage suggests proximity near the location ({name})."
+    return "Detective note: Footage suggests movement near the location."
 
 
 def _lead_lines(state: InvestigationState) -> list[str]:
@@ -227,13 +313,19 @@ def _lead_lines(state: InvestigationState) -> list[str]:
     return lines
 
 
+def _neighbor_lead_lines(state: InvestigationState) -> list[str]:
+    if not state.neighbor_leads:
+        return ["(none)"]
+    return [format_neighbor_lead(lead) for lead in state.neighbor_leads]
+
+
 def _poi_lines(state: InvestigationState) -> list[str]:
     if not state.scene_pois:
         return ["(none)"]
     lines: list[str] = []
     for idx, poi in enumerate(state.scene_pois, start=1):
         status = "visited" if poi.poi_id in state.visited_poi_ids else "unvisited"
-        lines.append(f"{idx}) {_poi_display_label(state, poi)} ({status})")
+        lines.append(f"{idx}) {_poi_display_line(state, poi)} ({status})")
     return lines
 
 
@@ -254,6 +346,10 @@ def _supporting_evidence_lines(presentation, evidence_ids: list) -> list[str]:
             continue
         lines.append(f"{item.summary} ({_format_confidence(item.confidence)})")
     return lines
+
+
+def _format_evidence_summary(item) -> str:
+    return f"{item.summary} ({_format_confidence(item.confidence)})"
 
 
 def _hypothesis_summary_lines(board: DeductionBoard, truth, presentation) -> list[str]:
@@ -282,7 +378,13 @@ def _hypothesis_summary_lines(board: DeductionBoard, truth, presentation) -> lis
     return lines
 
 
-def _choose_evidence(truth, presentation, known_ids: list) -> list:
+def _choose_evidence(
+    truth,
+    presentation,
+    state: InvestigationState,
+    known_ids: list,
+    gaze_mode: GazeMode,
+) -> list:
     items = [item for item in presentation.evidence if item.id in set(known_ids)]
     if not items:
         print("No evidence collected yet.")
@@ -291,21 +393,49 @@ def _choose_evidence(truth, presentation, known_ids: list) -> list:
     for idx, item in enumerate(items, start=1):
         if isinstance(item, WitnessStatement):
             print(f"{idx}) Witness statement")
-            print(f"   Time: {_format_time_phrase(item.reported_time_window)} (estimate)")
-            print(f"   Statement: {item.statement}")
-            print(f"   {_witness_note(truth, item)}")
-            print(f"   Confidence: {_format_confidence(item.confidence)}")
+            lines = format_witness_lines(
+                _format_time_phrase(item.reported_time_window),
+                item.statement,
+                _witness_note(truth, item),
+                _format_confidence(item.confidence),
+                list(item.uncertainty_hooks),
+                gaze_mode,
+            )
+            _print_lines(lines, prefix="   ")
         elif isinstance(item, ForensicObservation):
             print(f"{idx}) {item.summary}")
             poi_label = _poi_label_for(state, item.poi_id)
             if poi_label:
                 print(f"   Location: {poi_label}")
-            print(f"   Observation: {item.observation}")
-            if item.tod_window:
-                print(f"   Estimated TOD: {_format_time_phrase(item.tod_window)}")
-            if item.stage_hint:
-                print(f"   Stage hint: {item.stage_hint}")
-            print(f"   Confidence: {_format_confidence(item.confidence)}")
+            tod_phrase = _format_time_phrase(item.tod_window) if item.tod_window else None
+            lines = format_forensic_lines(
+                item.observation,
+                _format_confidence(item.confidence),
+                tod_phrase,
+                item.stage_hint,
+                gaze_mode,
+            )
+            _print_lines(lines, prefix="   ")
+        elif isinstance(item, CCTVReport):
+            print(f"{idx}) {item.summary}")
+            time_phrase = _format_time_phrase(item.time_window)
+            lines = format_cctv_lines(
+                item.summary,
+                time_phrase,
+                _cctv_note(truth, item),
+                _format_confidence(item.confidence),
+                gaze_mode,
+            )
+            _print_lines(lines, prefix="   ")
+        elif isinstance(item, ForensicsResult):
+            print(f"{idx}) {item.summary}")
+            lines = format_forensics_result_lines(
+                item.finding,
+                item.method_category,
+                _format_confidence(item.confidence),
+                gaze_mode,
+            )
+            _print_lines(lines, prefix="   ")
         else:
             print(f"{idx}) {item.summary} ({item.evidence_type}, {item.confidence})")
     choice = input("> ").strip()
@@ -322,6 +452,42 @@ def _choose_evidence(truth, presentation, known_ids: list) -> list:
         if 0 <= idx < len(items):
             selected.append(items[idx].id)
     return selected
+
+
+def _selected_evidence_summary(presentation, evidence_id) -> str | None:
+    item = next((e for e in presentation.evidence if e.id == evidence_id), None)
+    if item is None:
+        return None
+    return _format_evidence_summary(item)
+
+
+def _print_case_start(truth, state: InvestigationState, modifiers: CaseStartModifiers) -> None:
+    print(
+        f"Case {truth.case_id} started. Investigation time limit {TIME_LIMIT}, "
+        f"pressure tolerance {PRESSURE_LIMIT}, trust {state.trust}/{TRUST_LIMIT}."
+    )
+    for line in modifiers.briefing_lines:
+        print(line)
+
+
+def _print_episode_intro(
+    episode_rng: Rng,
+    location_name: str,
+    district: str,
+    show_previously: bool,
+    world: WorldState,
+) -> None:
+    if show_previously:
+        recap_lines = build_previously_on(world)
+        for line in recap_lines:
+            print(line)
+    episode_title = build_episode_title(episode_rng, location_name, district)
+    print(f"Episode: {episode_title}")
+    cold_open = build_cold_open(episode_rng, location_name)
+    for line in cold_open:
+        print(line)
+    for line in build_partner_line(episode_rng):
+        print(line)
 
 
 def _start_case(
@@ -358,6 +524,7 @@ def _start_case(
     next_state.scene_pois = [ScenePOI(**row) for row in poi_rows if isinstance(row, dict)]
     body_poi_id = case_facts.get("body_poi_id") or case_facts.get("primary_poi_id")
     next_state.body_poi_id = body_poi_id or None
+    next_state.neighbor_leads = build_neighbor_leads(scene_layout)
     _sync_people(world, truth, case_id, world.tick)
     if has_returning:
         modifiers = CaseStartModifiers(
@@ -420,7 +587,15 @@ def _run_smoke(seed: int, case_id: str | None, case_archetype: CaseArchetype | N
     request_cctv(truth, presentation, state, location_id)
     if state.scene_pois:
         poi = state.scene_pois[0]
-        visit_scene(truth, presentation, state, location_id, poi_id=poi.poi_id, poi_label=poi.label)
+        visit_scene(
+            truth,
+            presentation,
+            state,
+            location_id,
+            poi_id=poi.poi_id,
+            poi_label=poi.label,
+            poi_description=getattr(poi, "description", ""),
+        )
     else:
         visit_scene(truth, presentation, state, location_id)
     board.sync_from_state(state)
@@ -472,6 +647,13 @@ def main() -> None:
         help="Force a case archetype (e.g., pattern or character).",
     )
     parser.add_argument(
+        "--gaze",
+        type=str,
+        choices=[g.value for g in GazeMode],
+        default=GazeMode.FORENSIC.value,
+        help="Presentation lens (forensic or behavioral).",
+    )
+    parser.add_argument(
         "--world-db",
         type=str,
         default=str(ROOT / "data" / "world_state.db"),
@@ -500,6 +682,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     case_archetype = CaseArchetype(args.case_archetype) if args.case_archetype else None
+    gaze_mode = GazeMode(args.gaze)
 
     if args.smoke:
         seed = args.seed
@@ -522,6 +705,8 @@ def main() -> None:
     base_rng = Rng(args.seed)
     case_index = 1
     case_start_tick = world.tick
+    selected_evidence_id = None
+    profile_lines: list[str] = []
     truth, presentation, state, board, location_id, item_id, district, location_name, modifiers = _start_case(
         base_rng,
         args.seed,
@@ -531,12 +716,15 @@ def main() -> None:
         case_archetype=case_archetype,
     )
 
-    print(
-        f"Case {truth.case_id} started. Investigation time limit {TIME_LIMIT}, "
-        f"pressure tolerance {PRESSURE_LIMIT}, trust {state.trust}/{TRUST_LIMIT}."
+    episode_rng = base_rng.fork(f"episode-{case_index}")
+    _print_episode_intro(
+        episode_rng,
+        location_name,
+        district,
+        show_previously=True,
+        world=world,
     )
-    for line in modifiers.briefing_lines:
-        print(line)
+    _print_case_start(truth, state, modifiers)
     print("Type a number to choose an action. Type 'q' to quit.")
 
     while True:
@@ -544,17 +732,69 @@ def main() -> None:
         print(
             f"Investigation Time: {state.time}/{TIME_LIMIT} | "
             f"Pressure: {state.pressure}/{PRESSURE_LIMIT} | "
-            f"Trust: {state.trust}/{TRUST_LIMIT}"
+            f"Trust: {state.trust}/{TRUST_LIMIT} | "
+            f"Gaze: {gaze_label(gaze_mode)}"
         )
         for line in _hypothesis_summary_lines(board, truth, presentation):
             print(line)
         print(f"Evidence known: {len(state.knowledge.known_evidence)}/{len(presentation.evidence)}")
-        print("Leads:")
-        for line in _lead_lines(state):
-            print(f"- {line}")
-        print("Scene POIs:")
-        for line in _poi_lines(state):
-            print(f"- {line}")
+        lead_lines = _lead_lines(state)
+        if lead_lines and lead_lines != ["(none)"]:
+            print(f"Leads ({len(lead_lines)})")
+            for line in lead_lines[:2]:
+                print(f"- {line}")
+            if len(lead_lines) > 2:
+                print(f"- ... +{len(lead_lines) - 2} more")
+        neighbor_lines = _neighbor_lead_lines(state)
+        if neighbor_lines and neighbor_lines != ["(none)"]:
+            print(f"Neighbor leads ({len(neighbor_lines)})")
+            for line in neighbor_lines[:2]:
+                print(f"- {line}")
+            if len(neighbor_lines) > 2:
+                print(f"- ... +{len(neighbor_lines) - 2} more")
+        if state.scene_pois:
+            print(f"Scene POIs ({len(state.scene_pois)})")
+            body_line = None
+            for poi in state.scene_pois:
+                if poi.poi_id == state.body_poi_id:
+                    status = "visited" if poi.poi_id in state.visited_poi_ids else "unvisited"
+                    body_line = f"{_poi_display_line(state, poi)} ({status})"
+                    break
+            shown = 0
+            if body_line:
+                print(f"- {body_line}")
+                shown = 1
+            else:
+                for poi in state.scene_pois[:2]:
+                    status = "visited" if poi.poi_id in state.visited_poi_ids else "unvisited"
+                    print(f"- {_poi_display_line(state, poi)} ({status})")
+                    shown += 1
+            remaining = len(state.scene_pois) - shown
+            if remaining > 0:
+                print(f"- ... +{remaining} more (use Visit scene to list)")
+        known_ids = list(state.knowledge.known_evidence)
+        if known_ids:
+            print(f"Evidence (known) ({len(known_ids)})")
+            for idx, evidence_id in enumerate(known_ids[:3], start=1):
+                item = next(
+                    (e for e in presentation.evidence if e.id == evidence_id),
+                    None,
+                )
+                if item is None:
+                    continue
+                print(f"- {_format_evidence_summary(item)}")
+            if len(known_ids) > 3:
+                print(f"- ... +{len(known_ids) - 3} more")
+        if selected_evidence_id:
+            selected_summary = _selected_evidence_summary(presentation, selected_evidence_id)
+            if selected_summary:
+                print(f"Selected evidence: {selected_summary}")
+        if profile_lines:
+            print("Profiling summary")
+            for line in profile_lines[:3]:
+                print(f"- {line}")
+            if len(profile_lines) > 3:
+                print(f"- ... +{len(profile_lines) - 3} more")
         print("1) Visit scene")
         print("2) Interview witness")
         print("3) Request CCTV")
@@ -565,8 +805,8 @@ def main() -> None:
         choice = input("> ").strip().lower()
         if choice == "q":
             break
-
-    if choice == "1":
+        result = None
+        if choice == "1":
             body_poi = None
             if state.body_poi_id:
                 for poi in state.scene_pois:
@@ -586,6 +826,7 @@ def main() -> None:
                     location_id,
                     poi_id=body_poi.poi_id,
                     poi_label=_poi_display_label(state, body_poi),
+                    poi_description=body_poi.description,
                 )
             else:
                 poi = _choose_poi(state)
@@ -597,6 +838,7 @@ def main() -> None:
                         location_id,
                         poi_id=poi.poi_id,
                         poi_label=_poi_display_label(state, poi),
+                        poi_description=poi.description,
                     )
                 else:
                     result = visit_scene(truth, presentation, state, location_id)
@@ -611,7 +853,25 @@ def main() -> None:
             if not selection:
                 print("No witness available.")
                 continue
-            result = interview(truth, presentation, state, selection[1].id, location_id)
+            approach = _choose_interview_approach()
+            if approach is None:
+                print("Invalid interview approach.")
+                continue
+            theme = None
+            if approach == InterviewApproach.THEME:
+                theme = _choose_interview_theme()
+                if theme is None:
+                    print("Invalid theme selection.")
+                    continue
+            result = interview(
+                truth,
+                presentation,
+                state,
+                selection[1].id,
+                location_id,
+                approach=approach,
+                theme=theme,
+            )
         elif choice == "3":
             result = request_cctv(truth, presentation, state, location_id)
         elif choice == "4":
@@ -626,7 +886,9 @@ def main() -> None:
             if not claims:
                 print("Invalid claim selection.")
                 continue
-            evidence_ids = _choose_evidence(truth, presentation, board.known_evidence_ids)
+            evidence_ids = _choose_evidence(
+                truth, presentation, state, board.known_evidence_ids, gaze_mode
+            )
             result = set_hypothesis(
                 state,
                 board,
@@ -642,7 +904,8 @@ def main() -> None:
                 board.hypothesis,
                 context_lines=context_lines,
             )
-            for line in format_profiling_summary(summary):
+            profile_lines = format_profiling_summary(summary)
+            for line in profile_lines:
                 print(line)
             continue
         elif choice == "7":
@@ -675,28 +938,58 @@ def main() -> None:
             for item in result.revealed:
                 if isinstance(item, WitnessStatement):
                     print("- New evidence: Witness statement")
-                    print(f"  Time: {_format_time_phrase(item.reported_time_window)} (estimate)")
-                    print(f"  Statement: {item.statement}")
-                    print(f"  {_witness_note(truth, item)}")
-                    print(f"  Confidence: {_format_confidence(item.confidence)}")
+                    lines = format_witness_lines(
+                        _format_time_phrase(item.reported_time_window),
+                        item.statement,
+                        _witness_note(truth, item),
+                        _format_confidence(item.confidence),
+                        list(item.uncertainty_hooks),
+                        gaze_mode,
+                    )
+                    _print_lines(lines, prefix="  ")
                 elif isinstance(item, ForensicObservation):
                     print(f"- New evidence: {item.summary}")
                     poi_label = _poi_label_for(state, item.poi_id)
                     if poi_label:
                         print(f"  Location: {poi_label}")
-                    print(f"  Observation: {item.observation}")
-                    if item.tod_window:
-                        print(f"  Estimated TOD: {_format_time_phrase(item.tod_window)}")
-                    if item.stage_hint:
-                        print(f"  Stage hint: {item.stage_hint}")
-                    print(f"  Confidence: {_format_confidence(item.confidence)}")
+                    tod_phrase = _format_time_phrase(item.tod_window) if item.tod_window else None
+                    lines = format_forensic_lines(
+                        item.observation,
+                        _format_confidence(item.confidence),
+                        tod_phrase,
+                        item.stage_hint,
+                        gaze_mode,
+                    )
+                    _print_lines(lines, prefix="  ")
+                elif isinstance(item, CCTVReport):
+                    print(f"- New evidence: {item.summary}")
+                    time_phrase = _format_time_phrase(item.time_window)
+                    lines = format_cctv_lines(
+                        item.summary,
+                        time_phrase,
+                        _cctv_note(truth, item),
+                        _format_confidence(item.confidence),
+                        gaze_mode,
+                    )
+                    _print_lines(lines, prefix="  ")
+                elif isinstance(item, ForensicsResult):
+                    print(f"- New evidence: {item.summary}")
+                    lines = format_forensics_result_lines(
+                        item.finding,
+                        item.method_category,
+                        _format_confidence(item.confidence),
+                        gaze_mode,
+                    )
+                    _print_lines(lines, prefix="  ")
                 else:
                     print(f"- New evidence: {item.summary} ({item.evidence_type}, {item.confidence})")
-                if isinstance(item, WitnessStatement):
-                    print(f"  Statement: {item.statement}")
         if result.notes:
             for note in result.notes:
                 print(f"- {note}")
+        if result.revealed:
+            selected_evidence_id = result.revealed[0].id
+        elif selected_evidence_id is None and state.knowledge.known_evidence:
+            selected_evidence_id = state.knowledge.known_evidence[0]
 
         if result.action == ActionType.ARREST:
             board.sync_from_state(state)
@@ -733,6 +1026,9 @@ def main() -> None:
                 world_store.record_case(world.case_history[-1])
             for note in world_notes:
                 print(f"- {note}")
+            end_rng = base_rng.fork(f"end-{case_index}")
+            for line in build_end_tag(end_rng, outcome.arrest_result.value):
+                print(line)
             case_index += 1
             case_start_tick = world.tick
             truth, presentation, state, board, location_id, item_id, district, location_name, modifiers = _start_case(
@@ -742,13 +1038,17 @@ def main() -> None:
                 world,
                 case_archetype=case_archetype,
             )
-            print(
-                f"New case {truth.case_id} started. "
-                f"Pressure {state.pressure}/{PRESSURE_LIMIT}, "
-                f"Trust {state.trust}/{TRUST_LIMIT}."
+            selected_evidence_id = None
+            profile_lines = []
+            episode_rng = base_rng.fork(f"episode-{case_index}")
+            _print_episode_intro(
+                episode_rng,
+                location_name,
+                district,
+                show_previously=False,
+                world=world,
             )
-            for line in modifiers.briefing_lines:
-                print(line)
+            _print_case_start(truth, state, modifiers)
 
     if world_store:
         world_store.save_world_state(world)

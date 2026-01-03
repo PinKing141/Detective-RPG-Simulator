@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -17,6 +17,8 @@ class ScenePOI:
     label: str
     zone_id: str
     zone_label: str
+    description: str = ""
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,86 @@ def _build_poi_id(zone_id: str, poi_name: str, index: int) -> str:
     return f"{zone_id}:{poi_name}:{index}"
 
 
+_POI_DESCRIPTIONS = {
+    "bed": [
+        "The bed is rumpled and pulled back.",
+        "The bed looks recently disturbed.",
+    ],
+    "door": [
+        "The door sits shut, latch intact.",
+        "The doorframe shows no obvious damage.",
+    ],
+    "window": [
+        "The window is closed; the sill is undisturbed.",
+        "The window is shut, curtains drawn tight.",
+    ],
+    "floor_area": [
+        "The floor shows light scuffing and movement.",
+        "The floor area is clear except for faint scuffs.",
+    ],
+    "table": [
+        "The table has been shifted slightly.",
+        "The table surface is mostly clear.",
+    ],
+    "counter": [
+        "The counter shows signs of recent use.",
+        "The counter is wiped clean but not pristine.",
+    ],
+    "sink": [
+        "The sink is damp, recently used.",
+        "The sink is dry; no fresh residue.",
+    ],
+    "mirror": [
+        "The mirror holds a faint handprint.",
+        "The mirror is clean, no obvious smears.",
+    ],
+    "threshold": [
+        "The threshold shows light wear and dust.",
+        "The threshold has faint marks near the edge.",
+    ],
+    "sofa": [
+        "The sofa cushions are out of place.",
+        "The sofa looks sat in recently.",
+    ],
+}
+
+_POI_GENERIC = [
+    "The {label} draws attention in the {zone}.",
+    "The {label} stands out in the {zone}.",
+    "The {label} looks disturbed in the {zone}.",
+]
+
+_POI_OUTDOOR = [
+    "The {label} is exposed to the open air.",
+    "The {label} sits out in the open.",
+]
+
+
+def _poi_description(rng: Rng, zone_label: str, poi_name: str, tags: list[str]) -> str:
+    key = poi_name.lower()
+    if key in _POI_DESCRIPTIONS:
+        return rng.choice(_POI_DESCRIPTIONS[key])
+    if "door" in key:
+        return rng.choice(_POI_DESCRIPTIONS["door"])
+    if "window" in key:
+        return rng.choice(_POI_DESCRIPTIONS["window"])
+    if "floor" in key:
+        return rng.choice(_POI_DESCRIPTIONS["floor_area"])
+    if "counter" in key:
+        return rng.choice(_POI_DESCRIPTIONS["counter"])
+    if "sink" in key:
+        return rng.choice(_POI_DESCRIPTIONS["sink"])
+    if "bed" in key:
+        return rng.choice(_POI_DESCRIPTIONS["bed"])
+    if "table" in key or "desk" in key:
+        return rng.choice(_POI_DESCRIPTIONS["table"])
+    if "outdoor" in tags or "open" in tags:
+        template = rng.choice(_POI_OUTDOOR)
+    else:
+        template = rng.choice(_POI_GENERIC)
+    return template.format(label=_format_label(poi_name), zone=zone_label.lower())
+
+
 def _zone_map(zone_templates: dict[str, Any]) -> dict[str, list[str]]:
     mapping: dict[str, list[str]] = {}
     for zone_id, template in zone_templates.items():
@@ -108,12 +190,17 @@ def _assemble_pois(
         poi_name = poi_options[0]
         used_templates.add(f"{zone_id}:{poi_name}")
         poi_id = _build_poi_id(zone_id, poi_name, len(pois))
+        tags = list(template.get("tags", []) or [])
+        zone_label = _zone_label(zone_templates, zone_id)
+        description = _poi_description(rng, zone_label, poi_name, tags)
         pois.append(
             ScenePOI(
                 poi_id=poi_id,
                 label=_poi_label(poi_name),
                 zone_id=zone_id,
-                zone_label=_zone_label(zone_templates, zone_id),
+                zone_label=zone_label,
+                description=description,
+                tags=tags,
             )
         )
     if len(pois) >= 3:
@@ -127,12 +214,17 @@ def _assemble_pois(
             if key in used_templates:
                 continue
             poi_id = _build_poi_id(zone_id, poi_name, len(candidates))
+            tags = list(template.get("tags", []) or [])
+            zone_label = _zone_label(zone_templates, zone_id)
+            description = _poi_description(rng, zone_label, poi_name, tags)
             candidates.append(
                 ScenePOI(
                     poi_id=poi_id,
                     label=_poi_label(poi_name),
                     zone_id=zone_id,
-                    zone_label=_zone_label(zone_templates, zone_id),
+                    zone_label=zone_label,
+                    description=description,
+                    tags=tags,
                 )
             )
     if not candidates:
@@ -168,12 +260,18 @@ def build_scene_layout(
             if zone_id not in zones:
                 zones.append(zone_id)
             poi_id = _build_poi_id(zone_id, poi_name, len(pois))
+            template = zone_templates.get(zone_id, {})
+            tags = list(template.get("tags", []) or [])
+            zone_label = _zone_label(zone_templates, zone_id)
+            description = _poi_description(rng, zone_label, poi_name, tags)
             pois.append(
                 ScenePOI(
                     poi_id=poi_id,
                     label=_poi_label(poi_name),
                     zone_id=zone_id,
-                    zone_label=_zone_label(zone_templates, zone_id),
+                    zone_label=zone_label,
+                    description=description,
+                    tags=tags,
                 )
             )
         if not zones or not pois:
@@ -191,12 +289,15 @@ def build_scene_layout(
         poi_names = archetype.get("poi_templates", []) or []
         for poi_name in poi_names[:5]:
             poi_id = _build_poi_id("scene", poi_name, len(pois))
+            zone_label = "Scene"
+            description = _poi_description(rng, zone_label, poi_name, [])
             pois.append(
                 ScenePOI(
                     poi_id=poi_id,
                     label=_poi_label(poi_name),
                     zone_id="scene",
-                    zone_label="Scene",
+                    zone_label=zone_label,
+                    description=description,
                 )
             )
     return SceneLayout(

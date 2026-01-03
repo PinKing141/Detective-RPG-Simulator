@@ -1,0 +1,734 @@
+version: 2
+source: "docs\\blueprint\\NEMESIS_MOTIF_LIBRARY.md"
+typology_constraints:
+  visionary:
+    allowed_categories: ["ritual_object", "linguistic_signature", "scene_geometry"]
+    strong_fits: ["17-32", "49-60", "33-36"]
+    rare: ["65-76"]
+  mission_oriented:
+    allowed_categories: ["linguistic_signature", "minimalist_token", "forensic_trace"]
+    strong_fits: ["49-60", "1-16", "65-76"]
+    rare: ["26-32"]
+  hedonistic:
+    allowed_categories: ["scene_geometry", "ritual_object", "forensic_trace"]
+    strong_fits: ["37-48", "23-32", "79", "77"]
+    rare: ["minimalist-only"]
+  power_control:
+    allowed_categories: ["forensic_trace", "scene_geometry", "minimalist_token"]
+    strong_fits: ["65-76", "33-48", "4-8"]
+    rare: ["26-32"]
+hard_rules:
+  signature_bundle: "1 primary motif + 1 supporting trace"
+  competence_gates:
+    low_competence_avoids: ["65-76"]
+    high_competence_prefers: ["65-76", "1-16"]
+  exposure_gates:
+    high_exposure_prefers: ["1-16", "65-76"]
+    low_exposure_allows: ["17-32", "33-48"]
+  no_body_crimes: ["scene_geometry", "linguistic_signature"]
+copycat_rules:
+  assessment_checks:
+    - "bundle_integrity"
+    - "constraint_fit"
+    - "craft_consistency"
+    - "comfort_zone_coherence"
+  labels:
+    confirmed: "Pattern Confirmed"
+    suspected: "Pattern Suspected"
+    imitation: "Imitation Likely"
+    rejected: "Pattern Rejected"
+  generation:
+    visible_motif_copied: true
+    forensic_trace_copied: false
+    context_diverges: true
+motifs:
+  - id: 1
+    name: "Coin turned heads-up"
+    category: "minimalist_token"
+    token: "single coin"
+    staging: "under tongue or on sill"
+    message: "A price was paid to cross a boundary; the act was weighed, not accidental."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 2
+    name: "Matchbook spine"
+    category: "minimalist_token"
+    token: "snapped matchbook"
+    staging: "tucked into pocket/hand"
+    message: "Ignition without flame; a signal that something was lit and then snuffed."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 3
+    name: "Paperclip hook"
+    category: "minimalist_token"
+    token: "altered clip"
+    staging: "left on table edge"
+    message: "Access was engineered quietly; improvisation is a habit."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 4
+    name: "Thread knot"
+    category: "minimalist_token"
+    token: "short thread with a specific knot"
+    staging: "tied to belt loop/chair"
+    message: "Binding without spectacle; control is private and deliberate."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 5
+    name: "Folded receipt triangle"
+    category: "minimalist_token"
+    token: "receipt folded tight"
+    staging: "placed in shoe"
+    message: "A transaction recorded; proof was kept, not burned."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 6
+    name: "Bottle cap scored"
+    category: "minimalist_token"
+    token: "cap with 3 identical scratches"
+    staging: "near sink/drain"
+    message: "A tally mark; the offender counts attempts or moments."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 7
+    name: "Key blank"
+    category: "minimalist_token"
+    token: "uncut key"
+    staging: "left in doorway"
+    message: "Entry is the point; access is central to the act."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 8
+    name: "Chalk dot"
+    category: "minimalist_token"
+    token: "small chalk dot on wall"
+    staging: "fixed at shoulder height"
+    message: "Marked and measured; the spot is chosen in advance."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 9
+    name: "Safety pin opened"
+    category: "minimalist_token"
+    token: "open pin"
+    staging: "pinned to curtain"
+    message: "Protection undone; exposure was deliberate."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 10
+    name: "Rubber band cross"
+    category: "minimalist_token"
+    token: "two bands crossed"
+    staging: "around wrist/handle"
+    message: "Temporary restraint; control without commitment."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 11
+    name: "Sticker seal"
+    category: "minimalist_token"
+    token: "blank circular sticker"
+    staging: "on mirror center"
+    message: "A witness mark; the scene is sealed for memory."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 12
+    name: "Torn page corner"
+    category: "minimalist_token"
+    token: "ripped corner from book"
+    staging: "placed under mug"
+    message: "A missing piece; something taken from a larger story."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 13
+    name: "Staple line"
+    category: "minimalist_token"
+    token: "3 staples in a row"
+    staging: "on paper scrap"
+    message: "Order imposed; the point is fixed in place."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 14
+    name: "Cigarette filter without ash"
+    category: "minimalist_token"
+    token: "clean filter"
+    staging: "upright in a crack"
+    message: "Ritual without indulgence; performance over pleasure."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 15
+    name: "Small square of foil"
+    category: "minimalist_token"
+    token: "foil square"
+    staging: "folded once, left flat"
+    message: "Wrapped and withheld; a contained act."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 16
+    name: "Button (single)"
+    category: "minimalist_token"
+    token: "lone button"
+    staging: "centered on threshold"
+    message: "Replaceable parts; people are interchangeable."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 17
+    name: "Tarot card (same arcana)"
+    category: "ritual_object"
+    token: "card"
+    staging: "on chest/desk"
+    message: "Fate assigned; the offender frames the outcome as inevitable."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 18
+    name: "Playing card (same rank)"
+    category: "ritual_object"
+    token: "card"
+    staging: "tucked into wallet"
+    message: "Chance dealt; the offender plays by their own rules."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 19
+    name: "Prayer slip"
+    category: "ritual_object"
+    token: "printed prayer line"
+    staging: "folded into thirds"
+    message: "Absolution requested; a quiet justification."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 20
+    name: "Hymn number"
+    category: "ritual_object"
+    token: "torn hymn-book index"
+    staging: "pinned"
+    message: "A chosen chorus; the act is placed inside a larger ritual."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 21
+    name: "Salt line"
+    category: "ritual_object"
+    token: "thin salt line"
+    staging: "across doorway"
+    message: "Boundary drawn; keep in or keep out."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 22
+    name: "Wax drip (color-fixed)"
+    category: "ritual_object"
+    token: "candle wax"
+    staging: "drip on bedside"
+    message: "Vigil kept; time was spent in the room."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 23
+    name: "Pressed flower"
+    category: "ritual_object"
+    token: "same species"
+    staging: "inside book/coat"
+    message: "A moment preserved; the victim is collected."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 24
+    name: "Small stone cairn"
+    category: "ritual_object"
+    token: "3 stacked stones"
+    staging: "on windowsill"
+    message: "Balance imposed; the scene is arranged, not chaotic."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 25
+    name: "String loop"
+    category: "ritual_object"
+    token: "looped twine"
+    staging: "hung from handle"
+    message: "A hint of restraint; control without full escalation."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 26
+    name: "Ribbon bow"
+    category: "ritual_object"
+    token: "neat bow"
+    staging: "tied to object"
+    message: "An offering; the act is wrapped as a gift."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 27
+    name: "Childhood sticker"
+    category: "ritual_object"
+    token: "outdated sticker"
+    staging: "on victim item"
+    message: "Innocence invoked; a private timeline referenced."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 28
+    name: "Origami crane"
+    category: "ritual_object"
+    token: "origami"
+    staging: "upright facing door"
+    message: "A witness left behind; a deliberate observer."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 29
+    name: "Bead strand (counted)"
+    category: "ritual_object"
+    token: "7 beads"
+    staging: "wrapped around finger"
+    message: "Ritual counting; steps are measured."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 30
+    name: "Mirror smudge symbol"
+    category: "ritual_object"
+    token: "finger-drawn mark"
+    staging: "always on mirror"
+    message: "Seen and acknowledged; the offender wants to be noticed."
+    discoverability:
+      - "forensics"
+    copycat_risk: "High"
+  - id: 31
+    name: "Printed quote strip"
+    category: "ritual_object"
+    token: "single line quote"
+    staging: "placed in mouth/pocket"
+    message: "A statement inserted; the offender speaks through a borrowed line."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 32
+    name: "Feather"
+    category: "ritual_object"
+    token: "same color feather"
+    staging: "under pillow/hand"
+    message: "Lightness or release; the act is framed as lifting."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 33
+    name: "Chair turned to face wall"
+    category: "scene_geometry"
+    staging: "one chair rotated"
+    message: "Forced confession; the room becomes a booth."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 34
+    name: "Curtains fully closed"
+    category: "scene_geometry"
+    staging: "closed even daytime"
+    message: "Privacy enforced; the act was hidden from the outside."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 35
+    name: "All lights on"
+    category: "scene_geometry"
+    staging: "every light on"
+    message: "Exposure on purpose; nothing is meant to be missed."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 36
+    name: "One bulb removed"
+    category: "scene_geometry"
+    staging: "missing bulb placed on table"
+    message: "Absence marked; an intentional gap in the room's logic."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 37
+    name: "Shoes aligned"
+    category: "scene_geometry"
+    staging: "shoes perfectly parallel"
+    message: "Order imposed; the scene is corrected."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 38
+    name: "Clock stopped"
+    category: "scene_geometry"
+    staging: "battery removed, left beside"
+    message: "Time interrupted; the moment is pinned."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 39
+    name: "Sink running"
+    category: "scene_geometry"
+    staging: "tap left dripping"
+    message: "Cleansing or erasure; time spent washing."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 40
+    name: "TV left on mute"
+    category: "scene_geometry"
+    staging: "volume at 0"
+    message: "A witness silenced; noise removed."
+    discoverability:
+      - "digital"
+      - "scene"
+    copycat_risk: "High"
+  - id: 41
+    name: "Phone face-down"
+    category: "scene_geometry"
+    staging: "placed face-down center"
+    message: "No contact allowed; outside voices cut off."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 42
+    name: "Windows latched from inside"
+    category: "scene_geometry"
+    staging: "deliberate latch state"
+    message: "Contained; the scene is sealed."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 43
+    name: "Fridge ajar"
+    category: "scene_geometry"
+    staging: "left open slightly"
+    message: "Decay invited; time is allowed to spoil."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 44
+    name: "All drawers pulled out"
+    category: "scene_geometry"
+    staging: "uniform distance"
+    message: "A search performed; performance over theft."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 45
+    name: "One drawer missing"
+    category: "scene_geometry"
+    staging: "removed entirely"
+    message: "A single absence; an item removed cleanly."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 46
+    name: "Water glass half-full"
+    category: "scene_geometry"
+    staging: "identical level each case"
+    message: "Measured restraint; precise control."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 47
+    name: "Overturned photo frame"
+    category: "scene_geometry"
+    staging: "face-down frame"
+    message: "Erasure of identity or memory."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 48
+    name: "Door left unlocked"
+    category: "scene_geometry"
+    staging: "deliberately unlocked"
+    message: "Invitation or confidence; the offender does not fear entry."
+    discoverability:
+      - "scene"
+    copycat_risk: "High"
+  - id: 49
+    name: "Three-word note"
+    category: "linguistic_signature"
+    token: "note"
+    style: "always 3 words"
+    message: "Control through brevity; no space for negotiation."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 50
+    name: "Spelling mistake (same)"
+    category: "linguistic_signature"
+    token: "note/text"
+    style: "repeated misspelling"
+    message: "Identity leak; the hand is consistent even when hidden."
+    discoverability:
+      - "digital"
+      - "scene"
+    copycat_risk: "Low"
+  - id: 51
+    name: "No punctuation"
+    category: "linguistic_signature"
+    token: "message"
+    style: "no punctuation ever"
+    message: "Flat affect; emotional distance."
+    discoverability:
+      - "digital"
+    copycat_risk: "Medium"
+  - id: 52
+    name: "Over-punctuated"
+    category: "linguistic_signature"
+    token: "message"
+    style: "excessive ellipses"
+    message: "Theatrical emphasis; dramatizing the act."
+    discoverability:
+      - "digital"
+    copycat_risk: "Medium"
+  - id: 53
+    name: "Second-person blame"
+    category: "linguistic_signature"
+    token: "note"
+    style: "\"you made me\""
+    message: "Projection; responsibility pushed outward."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 54
+    name: "Third-person distancing"
+    category: "linguistic_signature"
+    token: "note"
+    style: "\"someone had to\""
+    message: "Disowning the act; author removes self."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 55
+    name: "Time-stamp obsession"
+    category: "linguistic_signature"
+    token: "message"
+    style: "exact times cited"
+    message: "Control of narrative; fixation on timing."
+    discoverability:
+      - "digital"
+    copycat_risk: "Low"
+  - id: 56
+    name: "Weather references"
+    category: "linguistic_signature"
+    token: "note"
+    style: "mentions weather"
+    message: "Atmosphere ritual; the scene tied to environment."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 57
+    name: "Biblical cadence"
+    category: "linguistic_signature"
+    token: "note"
+    style: "verse-like rhythm"
+    message: "Moral framing; judgment ritualized."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 58
+    name: "Clinical phrasing"
+    category: "linguistic_signature"
+    token: "note"
+    style: "medical terms"
+    message: "Dehumanization; the victim becomes a subject."
+    discoverability:
+      - "scene"
+      - "digital"
+    copycat_risk: "Medium"
+  - id: 59
+    name: "Apology without ownership"
+    category: "linguistic_signature"
+    token: "note"
+    style: "\"sorry it happened\""
+    message: "Regret without accountability."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 60
+    name: "Borrowed phrases"
+    category: "linguistic_signature"
+    token: "note"
+    style: "same quote reused"
+    message: "Scripted identity; rehearsed message."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 61
+    name: "Voice note cadence"
+    category: "linguistic_signature"
+    token: "audio"
+    style: "consistent cadence"
+    message: "Presence asserted; a controlled breath."
+    discoverability:
+      - "digital"
+    copycat_risk: "Low"
+  - id: 62
+    name: "Call then hang up"
+    category: "linguistic_signature"
+    token: "call log"
+    message: "Contact without dialogue; dominance through denial."
+    discoverability:
+      - "digital"
+    copycat_risk: "Low"
+  - id: 63
+    name: "CCTV taunt"
+    category: "linguistic_signature"
+    token: "camera angle chosen"
+    message: "I see you; awareness of surveillance."
+    discoverability:
+      - "digital"
+    copycat_risk: "Low"
+  - id: 64
+    name: "Forum post echo"
+    category: "linguistic_signature"
+    token: "online post"
+    message: "Leak into public; a pattern of voice outside the scene."
+    discoverability:
+      - "digital"
+    copycat_risk: "Medium"
+  - id: 65
+    name: "Selective wipe"
+    category: "forensic_trace"
+    trace: "wiped only one surface type"
+    message: "Habitual control; a preferred surface was cleaned."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 66
+    name: "Bleach misuse"
+    category: "forensic_trace"
+    trace: "over-bleached leaves chemical tell"
+    message: "Control without skill; overcorrection leaves a mark."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 67
+    name: "Glove pattern"
+    category: "forensic_trace"
+    trace: "same glove material fibers"
+    message: "Consistent kit; the same protection used."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 68
+    name: "Tape residue pattern"
+    category: "forensic_trace"
+    trace: "same adhesive family"
+    message: "Restraint habit; a familiar adhesive."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 69
+    name: "Knot type"
+    category: "forensic_trace"
+    trace: "recurring knot mechanics"
+    message: "Training or practice; repeatable mechanics."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 70
+    name: "Lace-up restraint"
+    category: "forensic_trace"
+    trace: "shoelace fibers"
+    message: "Improvised but consistent; use of what is at hand."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 71
+    name: "Footwear outsole class"
+    category: "forensic_trace"
+    trace: "consistent outsole type"
+    message: "Same shoe family; repeatable footprint."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 72
+    name: "Tool mark class"
+    category: "forensic_trace"
+    trace: "same pry/lock mark geometry"
+    message: "Same tool family; repeated entry method."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 73
+    name: "Cigarette brand + cut"
+    category: "forensic_trace"
+    trace: "same cut style"
+    message: "Ritual consumption; a personal routine."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 74
+    name: "Specific accelerant profile"
+    category: "forensic_trace"
+    trace: "recurring accelerant"
+    message: "Cleanup preference; a familiar chemical."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 75
+    name: "Body moved pattern"
+    category: "forensic_trace"
+    trace: "drag marks consistent"
+    message: "Methodical handling; controlled relocation."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 76
+    name: "Post-mortem wash"
+    category: "forensic_trace"
+    trace: "water + detergent evidence"
+    message: "Purification ritual; removal after the fact."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 77
+    name: "Trophy removal (same)"
+    category: "forensic_trace"
+    trace: "missing same item type"
+    message: "Collection behavior; a missing category."
+    discoverability:
+      - "scene"
+      - "forensics"
+    copycat_risk: "Medium"
+  - id: 78
+    name: "Staged burglary but no theft"
+    category: "forensic_trace"
+    trace: "valuables untouched"
+    message: "Misdirection; appearance over theft."
+    discoverability:
+      - "scene"
+    copycat_risk: "Medium"
+  - id: 79
+    name: "Overkill distribution"
+    category: "forensic_trace"
+    trace: "repeated wound placement pattern"
+    message: "Ritual aggression; repeated placement."
+    discoverability:
+      - "forensics"
+    copycat_risk: "Low"
+  - id: 80
+    name: "Consistent disposal habit"
+    category: "forensic_trace"
+    trace: "same dumping ecology"
+    message: "Comfort zone; the dump follows a pattern."
+    discoverability:
+      - "scene"
+      - "forensics"
+    copycat_risk: "Low"

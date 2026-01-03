@@ -26,6 +26,14 @@ class Lead:
     status: LeadStatus = LeadStatus.ACTIVE
 
 
+@dataclass(frozen=True)
+class NeighborLead:
+    slot_id: str
+    label: str
+    hearing_bias: float
+    witness_roles: dict[str, float]
+
+
 LEAD_DEADLINES = {
     EvidenceType.TESTIMONIAL: 2,
     EvidenceType.CCTV: 3,
@@ -42,6 +50,19 @@ LEAD_ACTIONS = {
     EvidenceType.TESTIMONIAL: "Interview witness",
     EvidenceType.CCTV: "Request CCTV",
     EvidenceType.FORENSICS: "Submit forensics",
+}
+
+_NEIGHBOR_LABELS = {
+    "neighbor_witness": "Neighbor witness",
+    "hall_witness": "Hallway witness",
+    "entry_witness": "Entry witness",
+    "adjacent_guest": "Adjacent guest",
+    "corridor_witness": "Corridor witness",
+    "passerby_witness": "Passerby witness",
+    "outside_witness": "Outside witness",
+    "neighbor_window": "Neighbor window",
+    "commuter_witness": "Commuter witness",
+    "driver_witness": "Driver witness",
 }
 
 
@@ -64,6 +85,43 @@ def build_leads(
             )
         )
     return leads[:3]
+
+
+def build_neighbor_leads(scene_layout: dict) -> list[NeighborLead]:
+    neighbor_slots = scene_layout.get("neighbor_slots", []) or []
+    leads: list[NeighborLead] = []
+    for slot in neighbor_slots:
+        slot_id = str(slot.get("id", "neighbor"))
+        lead_type = str(slot.get("lead_type", "neighbor_witness"))
+        label = _NEIGHBOR_LABELS.get(lead_type, lead_type.replace("_", " ").title())
+        hearing_bias = float(slot.get("hearing_bias", 0.3))
+        witness_roles = slot.get("witness_roles", {}) or {}
+        count = int(slot.get("count", 1))
+        for idx in range(max(1, count)):
+            leads.append(
+                NeighborLead(
+                    slot_id=f"{slot_id}:{idx + 1}",
+                    label=label,
+                    hearing_bias=hearing_bias,
+                    witness_roles={str(k): float(v) for k, v in witness_roles.items()},
+                )
+            )
+    return leads
+
+
+def format_neighbor_lead(lead: NeighborLead) -> str:
+    if lead.hearing_bias >= 0.55:
+        hearing = "high audibility"
+    elif lead.hearing_bias >= 0.35:
+        hearing = "moderate audibility"
+    else:
+        hearing = "low audibility"
+    roles = sorted(lead.witness_roles.items(), key=lambda item: item[1], reverse=True)
+    role_text = ""
+    if roles:
+        role_names = [role for role, _ in roles[:2]]
+        role_text = f"; likely {', '.join(role_names)}"
+    return f"{lead.label} ({hearing}{role_text})"
 
 
 def update_lead_statuses(state: InvestigationState) -> list[str]:
