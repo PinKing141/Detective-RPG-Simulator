@@ -179,6 +179,102 @@ Perception proof
 
 Stop condition: Do not add background simulation. Memory beats simulation.
 
+## Phase 3A - Investigative Depth (Forensic Observation)
+Phase question: Do crime scenes create meaningful, uncertain evidence without new mechanics?
+Full spec: docs/blueprint/PHASE_3A_TASKS.md
+
+Scope
+- ZOI-lite: 3 to 5 points of interest per scene.
+- Forensic observations as evidence items (wound class, TOD band).
+- Bounded uncertainty (bands, not equations).
+- Existing evidence classes only (physical/temporal/testimonial).
+- Forensic clocks as stages (algor/rigor/livor bands), not formulas.
+- LocationProfile pack (data/schemas/locations.yml) for presence curves, witness roles, surveillance defaults,
+  plus scope sets (zones + neighbor slots) and zone templates for scene depth.
+- Anchor objects and POI templates for scene descriptions (no guess-the-verb).
+- Scene generation modes: top-down for most cases; bottom-up for character/pattern cases.
+
+Stop condition: If scenes feel investigatory and still uncertain, stop.
+
+## Phase 3B - Interview System (Stateful Interviews)
+Phase question: Can dialogue create tradeoffs and risk without becoming a tree?
+Full spec: docs/blueprint/PHASE_3B_TASKS.md
+
+Scope
+- Interview protocol states (baseline, pressure, shutdown, confession).
+- Rapport and resistance as costs and risks.
+- Lies are explicit and motive-driven, not random noise.
+- Statements become evidence with confidence bands.
+- Theme framing choices (minimization) allowed as a pressure tool.
+- Linguistic tell cues are template-based only (no NLP yet).
+- Interview state data model stored per NPC (phase, rapport, resistance, fatigue).
+- Evidence emissions produced through the existing action result pipeline.
+- Baseline profile metrics tracked for uncertainty hooks (sentence length, tense, pronoun ratio).
+
+Stop condition: If interviews can go cold and produce contradictions, stop.
+
+## Phase 3C - Gaze and TV Framing (Presentation Only)
+Phase question: Can presentation deliver the TV-science feel without adding facts?
+Full spec: docs/blueprint/PHASE_3C_TASKS.md
+
+Scope
+- Detective gaze overlays (forensic vs behavioral) as presentation filters.
+- Episode titles, cold opens, end tags, and "Previously on..." recaps.
+- No new truth facts and no validation impact.
+- Optional Tracery flavor lines for gaze overlays (presentation only).
+- Perception filters are phrasing-only (no stat thresholds yet).
+
+Stop condition: If the same case reads differently without changing evidence, stop.
+
+## Phase 3D - Nemesis Pattern Tracker (Proto-Nemesis)
+Phase question: Can players recognize a recurring signature without a full arc?
+Full spec: docs/blueprint/PHASE_3D_TASKS.md
+
+Scope
+- Signature motif system (token + staging + message).
+- Pattern tracker log (what has been seen across cases).
+- False positives and unrelated quirks (legible, not deceptive).
+- No persistence required beyond session memory.
+- Pattern assessment labels (Confirmed/Suspected/Imitation/Rejected).
+- Motif library and typology gate rules applied at generation time.
+- Pattern updates rendered as case-file addenda (BAU tone).
+
+Stop condition: If players can say "same offender" without certainty, stop.
+
+## Phase 3E - Persistent Offender (Light Nemesis Memory)
+Phase question: Does a single offender persist across cases with minimal adaptation?
+Full spec: docs/blueprint/PHASE_3E_TASKS.md
+
+Scope
+- Store one nemesis profile between cases (identity packet).
+- Simple adaptation: avoid last compromised method.
+- Escalation rule: if not caught, next crime increases visibility.
+- Nemesis Exposure is tracked separately from department Pressure.
+- No endgame ops, no DIM, no counterplay traits.
+- Typology priors (Visionary/Mission/Hedonistic/Power) as selection bias.
+- MO vector (approach/control/method/cleanup/exit) with weights and competence.
+
+Stop condition: If the offender feels persistent without dominating the game, stop.
+
+## Nemesis scope rules (global)
+Core principle:
+- One Nemesis is the spine. Other serial offenders are noise.
+
+Concurrency limits:
+- Exactly one adaptive Nemesis at a time.
+- Up to two non-adaptive serial offenders may run concurrently.
+- Copycats only appear after a Nemesis has been seen twice.
+
+Replacement rule:
+- A new Nemesis replaces the old one only after capture, death, disappearance,
+  or a lost trail. No parallel Nemeses.
+
+Phase placement:
+- Phase 1 to 2: no Nemesis; background serial offenders may exist.
+- Phase 3: recurring offender without adaptation (pattern recognition only).
+- Phase 4: promote one offender to Nemesis; enable adaptation and endgame ops.
+- Phase 5+: Nemesis can be resolved and replaced.
+
 ## Phase 4 - Campaign and Endings
 Phase question: Do conclusions feel earned, varied, and behavior-reflective?
 Full spec: docs/blueprint/PHASE_4_TASKS.md
@@ -197,7 +293,6 @@ Phase 4 deliverables (artifacts)
 - Nemesis arc controller (closing-in logic).
 - Endings system (early + final endings).
 - Epilogue generator (identity-based summary).
-- Episode framing (titles, cold opens, end tags, "Previously on...").
 - Save/load includes campaign and ending flags.
 
 Phase 4 systems (what to build)
@@ -215,9 +310,8 @@ Phase 4 systems (what to build)
 4) Detective identity synthesis
    - Behavior signals: arrest timing, evidence reliance, pressure tolerance,
      trust trajectory, coercive vs empathetic approaches.
-5) TV framing
-   - Episode title, cold open, end tag.
-   - "Previously on..." recap from last 3 to 6 events.
+   - DIM counters drive nemesis counterplay traits in Phase 4.
+5) TV framing is locked in Phase 3C and must be present; do not expand it here.
 6) Endgame operations framework (single pipeline)
    - Unified flow: trigger -> plan -> execute -> outcome -> fallout.
    - Operation wrappers: warrant, stakeout, bait, raid.
@@ -245,9 +339,8 @@ Phase 4 ordered task list
 4. Operations framework (warrant, stakeout, bait, raid).
 5. Endgame operation (pick one style first, then add wrappers).
 6. Ending triggers + epilogue generator (early + final).
-7. TV framing (titles, recaps, end tags).
-8. Save/load covers campaign + ending state.
-9. Optional crime family expansion (if needed).
+7. Save/load covers campaign + ending state.
+8. Optional crime family expansion (if needed).
 
 Phase 4 exit checklist (hard gate)
 Campaign completeness
@@ -261,8 +354,7 @@ Endings
 - [ ] At least 2 early endings exist and feel complete.
 - [ ] Endings reflect player method, not correctness.
 TV feel
-- [ ] Each case has a title + short intro + short outro.
-- [ ] "Previously on..." recap uses logged events and is readable.
+- [ ] Uses Phase 3C framing without expansion.
 Legibility
 - [ ] For any ending, the player can explain why it happened in-world.
 
@@ -283,3 +375,8 @@ Restraint proof
 - [ ] Every polish change improves comprehension or pacing.
 
 Stop condition: When polish stops improving comprehension, stop entirely.
+
+Deferred beyond Phase 5 (optional experiments only)
+- spaCy/SCAN linguistic analysis.
+- Full forensic equations (algor/rigor/livor physics).
+- Full macro/meso/micro ZOI traversal.

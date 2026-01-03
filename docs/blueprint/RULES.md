@@ -38,6 +38,11 @@ This is the design contract. If a feature conflicts with these rules, the featur
 - Scale only after content atom proofs (witness lines, profiling paragraphs, recap stings).
 - Religion, intelligence, and personality are color unless promoted to an active modulator.
 - Intelligence is domain competence, not a generic IQ slider.
+- Baseline interview metrics are used only for uncertainty hooks, not truth or scoring.
+- Gaze/perception overlays are phrasing-only; no stat-gated facts in Phase 3C.
+- Pattern updates render as case-file addenda, not raw lists.
+- POI anchors are descriptive only; no micro-traversal UI in Phase 3A.
+- Scene generation uses top-down by default; bottom-up only for character or pattern cases.
 
 ## Phase 4 guardrails
 - Endings reflect behavior under pressure, not correctness or scores.
