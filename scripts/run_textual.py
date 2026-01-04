@@ -43,6 +43,11 @@ def main() -> None:
         action="store_true",
         help="Run without persisting world state.",
     )
+    parser.add_argument(
+        "--reset-world",
+        action="store_true",
+        help="Reset stored world state before starting.",
+    )
     args = parser.parse_args()
 
     world_db = None if args.no_world_db else Path(args.world_db)
@@ -54,6 +59,7 @@ def main() -> None:
         world_db=world_db,
         case_archetype=case_archetype,
         gaze_mode=gaze_mode,
+        reset_world=args.reset_world,
     )
     app.run()
 

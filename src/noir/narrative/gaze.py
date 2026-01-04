@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from noir.narrative.grammar import normalize_line
+
 
 class GazeMode(StrEnum):
     FORENSIC = "forensic"
@@ -24,6 +26,7 @@ def format_witness_lines(
     uncertainty_hooks: list[str],
     mode: GazeMode,
 ) -> list[str]:
+    statement = normalize_line(statement)
     if mode == GazeMode.BEHAVIORAL:
         timing_label = "Timing"
         statement_label = "Account"
@@ -38,10 +41,11 @@ def format_witness_lines(
     ]
     if note:
         cleaned = note.replace("Detective note:", "").strip()
+        cleaned = normalize_line(cleaned)
         lines.append(f"{note_label}: {cleaned}")
     if uncertainty_hooks:
         lines.append("Uncertainty:")
-        lines.extend(f"- {hook}" for hook in uncertainty_hooks)
+        lines.extend(f"- {normalize_line(hook)}" for hook in uncertainty_hooks)
     lines.append(f"Confidence: {confidence}")
     return lines
 
@@ -53,6 +57,9 @@ def format_forensic_lines(
     stage_hint: str | None,
     mode: GazeMode,
 ) -> list[str]:
+    observation = normalize_line(observation)
+    if stage_hint:
+        stage_hint = normalize_line(stage_hint)
     if mode == GazeMode.BEHAVIORAL:
         obs_label = "Scene read"
         tod_label = "Timing"
@@ -77,6 +84,7 @@ def format_cctv_lines(
     confidence: str,
     mode: GazeMode,
 ) -> list[str]:
+    summary = normalize_line(summary)
     if mode == GazeMode.BEHAVIORAL:
         time_label = "Timing"
         note_label = "Read"
@@ -91,6 +99,7 @@ def format_cctv_lines(
     ]
     if note:
         cleaned = note.replace("Detective note:", "").strip()
+        cleaned = normalize_line(cleaned)
         lines.append(f"{note_label}: {cleaned}")
     lines.append(f"Confidence: {confidence}")
     return lines
@@ -102,6 +111,7 @@ def format_forensics_result_lines(
     confidence: str,
     mode: GazeMode,
 ) -> list[str]:
+    finding = normalize_line(finding)
     if mode == GazeMode.BEHAVIORAL:
         finding_label = "Trace read"
         method_label = "Method class"

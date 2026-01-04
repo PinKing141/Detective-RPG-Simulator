@@ -77,6 +77,12 @@ The nemesis never defines the ending. The player's approach does.
 - Epilogue generator (identity-based summary).
 - Save/load includes campaign + ending flags.
 
+## Phase 4 fairness rules (anti-cheat)
+- Capture requires both pattern confidence and operational readiness; no hidden thresholds.
+- Misses are explained in-world and tied to player choices (warrant denial, raid burn).
+- Every miss yields concrete progression (new constraint, motif detail, narrowed zone).
+- Same inputs must produce the same outcomes (determinism over drama).
+
 ## 4) Ending taxonomy (behavioral axes, not scores)
 
 Core principle:

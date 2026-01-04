@@ -36,6 +36,13 @@ class CaseStartModifiers:
     briefing_lines: list[str]
 
 
+@dataclass
+class EpisodeTitleState:
+    used_ids: list[int] = field(default_factory=list)
+    recent_registers: list[str] = field(default_factory=list)
+    recent_tags: list[str] = field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class PersonRecord:
     person_id: str
@@ -60,6 +67,7 @@ class WorldState:
     location_status: dict[str, DistrictStatus] = field(default_factory=dict)
     case_history: list[CaseRecord] = field(default_factory=list)
     people_index: dict[str, PersonRecord] = field(default_factory=dict)
+    episode_titles: EpisodeTitleState = field(default_factory=EpisodeTitleState)
 
     def district_status_for(self, district: str) -> DistrictStatus:
         if district in self.district_status:
@@ -136,9 +144,11 @@ class WorldState:
         lines = [
             self._pressure_line(),
             self._trust_line(),
-            self._district_line(status),
-            self._location_line(location_status),
         ]
+        if status != DistrictStatus.CALM:
+            lines.append(self._district_line(status))
+        if location_status != DistrictStatus.CALM:
+            lines.append(self._location_line(location_status))
         return [line for line in lines if line]
 
     def location_status_for(self, location_name: str) -> DistrictStatus:

@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import sqlite3
 
-from noir.world.state import CaseRecord, DistrictStatus, PersonRecord, WorldState
+from noir.world.state import (
+    CaseRecord,
+    DistrictStatus,
+    EpisodeTitleState,
+    PersonRecord,
+    WorldState,
+)
 
 
 class WorldStore:
@@ -17,6 +24,19 @@ class WorldStore:
 
     def close(self) -> None:
         self.conn.close()
+
+    def reset_world_state(self) -> None:
+        cur = self.conn.cursor()
+        for table in (
+            "world_state",
+            "episode_title_state",
+            "case_history",
+            "district_status",
+            "location_status",
+            "people_index",
+        ):
+            cur.execute(f"DELETE FROM {table}")
+        self.conn.commit()
 
     def load_world_state(self) -> WorldState:
         cur = self.conn.cursor()
@@ -32,6 +52,14 @@ class WorldStore:
             tick=int(row["tick"]),
             nemesis_activity=int(row["nemesis_activity"]),
         )
+        cur.execute("SELECT used_ids, recent_registers, recent_tags FROM episode_title_state WHERE id = 1")
+        row = cur.fetchone()
+        if row is not None:
+            state.episode_titles = EpisodeTitleState(
+                used_ids=json.loads(row["used_ids"] or "[]"),
+                recent_registers=json.loads(row["recent_registers"] or "[]"),
+                recent_tags=json.loads(row["recent_tags"] or "[]"),
+            )
         cur.execute("SELECT district, status FROM district_status")
         for entry in cur.fetchall():
             status = DistrictStatus(entry["status"])
@@ -93,6 +121,21 @@ class WorldStore:
                 nemesis_activity = excluded.nemesis_activity
             """,
             (state.trust, state.pressure, state.tick, state.nemesis_activity),
+        )
+        cur.execute(
+            """
+            INSERT INTO episode_title_state (id, used_ids, recent_registers, recent_tags)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                used_ids = excluded.used_ids,
+                recent_registers = excluded.recent_registers,
+                recent_tags = excluded.recent_tags
+            """,
+            (
+                json.dumps(state.episode_titles.used_ids),
+                json.dumps(state.episode_titles.recent_registers),
+                json.dumps(state.episode_titles.recent_tags),
+            ),
         )
         cur.execute("DELETE FROM district_status")
         for district, status in state.district_status.items():
@@ -179,6 +222,16 @@ class WorldStore:
                 pressure_level INTEGER NOT NULL,
                 tick INTEGER NOT NULL,
                 nemesis_activity INTEGER NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS episode_title_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                used_ids TEXT,
+                recent_registers TEXT,
+                recent_tags TEXT
             )
             """
         )

@@ -49,6 +49,7 @@ from noir.narrative.recaps import (
     build_partner_line,
     build_previously_on,
 )
+from noir.nemesis import PatternTracker
 from noir.presentation.evidence import (
     CCTVReport,
     ForensicObservation,
@@ -58,6 +59,7 @@ from noir.presentation.evidence import (
 from noir.presentation.projector import project_case
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
+from noir.util.grammar import normalize_line
 from noir.persistence.db import WorldStore
 from noir.world.autonomy import apply_autonomy
 from noir.world.state import CaseStartModifiers, PersonRecord, WorldState
@@ -190,7 +192,7 @@ def _poi_display_label(state: InvestigationState, poi: ScenePOI) -> str:
 def _poi_display_line(state: InvestigationState, poi: ScenePOI) -> str:
     label = _poi_display_label(state, poi)
     if poi.description:
-        return f"{label}: {poi.description}"
+        return f"{label}: {normalize_line(poi.description)}"
     return label
 
 
@@ -277,7 +279,7 @@ def _format_confidence(confidence) -> str:
 
 def _print_lines(lines: list[str], prefix: str = "") -> None:
     for line in lines:
-        print(f"{prefix}{line}")
+        print(f"{prefix}{normalize_line(line)}")
 
 
 def _witness_note(truth, item: WitnessStatement) -> str:
@@ -349,7 +351,8 @@ def _supporting_evidence_lines(presentation, evidence_ids: list) -> list[str]:
 
 
 def _format_evidence_summary(item) -> str:
-    return f"{item.summary} ({_format_confidence(item.confidence)})"
+    summary = normalize_line(item.summary)
+    return f"{summary} ({_format_confidence(item.confidence)})"
 
 
 def _hypothesis_summary_lines(board: DeductionBoard, truth, presentation) -> list[str]:
@@ -476,12 +479,28 @@ def _print_episode_intro(
     district: str,
     show_previously: bool,
     world: WorldState,
+    case_archetype: str | None = None,
 ) -> None:
     if show_previously:
         recap_lines = build_previously_on(world)
         for line in recap_lines:
             print(line)
-    episode_title = build_episode_title(episode_rng, location_name, district)
+    episode_kind = "copycat" if case_archetype == CaseArchetype.PATTERN.value else "normal"
+    tag_map = {
+        CaseArchetype.PRESSURE.value: ["pressure", "escalation"],
+        CaseArchetype.PATTERN.value: ["recurrence", "copycat"],
+        CaseArchetype.CHARACTER.value: ["identity", "personal"],
+        CaseArchetype.FORESHADOWING.value: ["recurrence", "escalation"],
+    }
+    case_tags = tag_map.get(case_archetype, [])
+    episode_title = build_episode_title(
+        episode_rng,
+        location_name,
+        district,
+        episode_kind=episode_kind,
+        case_tags=case_tags,
+        title_state=world.episode_titles,
+    )
     print(f"Episode: {episode_title}")
     cold_open = build_cold_open(episode_rng, location_name)
     for line in cold_open:
@@ -547,6 +566,7 @@ def _start_case(
         district,
         location_name,
         modifiers,
+        case_facts,
     )
 
 
@@ -570,7 +590,7 @@ def _find_seed_with_observed(
 def _run_smoke(seed: int, case_id: str | None, case_archetype: CaseArchetype | None) -> None:
     base_rng = Rng(seed)
     world = WorldState()
-    truth, presentation, state, board, location_id, item_id, _, _, _ = _start_case(
+    truth, presentation, state, board, location_id, item_id, _, _, _, _ = _start_case(
         base_rng,
         seed,
         1,
@@ -665,6 +685,11 @@ def main() -> None:
         help="Run without persisting world state.",
     )
     parser.add_argument(
+        "--reset-world",
+        action="store_true",
+        help="Reset stored world state before starting.",
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="Run a short non-interactive smoke path and exit.",
@@ -700,14 +725,17 @@ def main() -> None:
     world = WorldState()
     if not args.no_world_db:
         world_store = WorldStore(Path(args.world_db))
+        if args.reset_world:
+            world_store.reset_world_state()
         world = world_store.load_world_state()
 
     base_rng = Rng(args.seed)
+    pattern_tracker = PatternTracker.from_library(base_rng.fork("pattern"))
     case_index = 1
     case_start_tick = world.tick
     selected_evidence_id = None
     profile_lines: list[str] = []
-    truth, presentation, state, board, location_id, item_id, district, location_name, modifiers = _start_case(
+    truth, presentation, state, board, location_id, item_id, district, location_name, modifiers, case_facts = _start_case(
         base_rng,
         args.seed,
         case_index,
@@ -723,6 +751,7 @@ def main() -> None:
         district,
         show_previously=True,
         world=world,
+        case_archetype=case_facts.get("case_archetype"),
     )
     _print_case_start(truth, state, modifiers)
     print("Type a number to choose an action. Type 'q' to quit.")
@@ -802,9 +831,18 @@ def main() -> None:
         print("5) Set hypothesis")
         print("6) Profiling summary")
         print("7) Arrest suspect")
+        print("g) Toggle gaze")
         choice = input("> ").strip().lower()
         if choice == "q":
             break
+        if choice == "g":
+            gaze_mode = (
+                GazeMode.BEHAVIORAL
+                if gaze_mode == GazeMode.FORENSIC
+                else GazeMode.FORENSIC
+            )
+            print(f"Gaze set to {gaze_label(gaze_mode)}.")
+            continue
         result = None
         if choice == "1":
             body_poi = None
@@ -1029,9 +1067,14 @@ def main() -> None:
             end_rng = base_rng.fork(f"end-{case_index}")
             for line in build_end_tag(end_rng, outcome.arrest_result.value):
                 print(line)
+            pattern_addendum = pattern_tracker.record_case(truth.case_id, case_index)
+            if pattern_addendum:
+                print("")
+                for line in pattern_addendum.render():
+                    print(line)
             case_index += 1
             case_start_tick = world.tick
-            truth, presentation, state, board, location_id, item_id, district, location_name, modifiers = _start_case(
+            truth, presentation, state, board, location_id, item_id, district, location_name, modifiers, case_facts = _start_case(
                 base_rng,
                 args.seed,
                 case_index,
@@ -1047,6 +1090,7 @@ def main() -> None:
                 district,
                 show_previously=False,
                 world=world,
+                case_archetype=case_facts.get("case_archetype"),
             )
             _print_case_start(truth, state, modifiers)
 

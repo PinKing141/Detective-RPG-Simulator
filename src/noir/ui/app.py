@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import time
 from typing import Any
 
 from textual.app import App, ComposeResult
-from textual.containers import Vertical, VerticalScroll
-from textual.widgets import Input, RichLog, Static
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.widgets import Input, ListItem, ListView, RichLog, Static
 
 from noir import config
 from noir.cases.archetypes import CaseArchetype
@@ -49,6 +50,7 @@ from noir.narrative.recaps import (
     build_partner_line,
     build_previously_on,
 )
+from noir.nemesis import PatternTracker
 from noir.presentation.evidence import (
     CCTVReport,
     ForensicObservation,
@@ -58,6 +60,7 @@ from noir.presentation.evidence import (
 from noir.presentation.projector import project_case
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
+from noir.util.grammar import normalize_line
 from noir.persistence.db import WorldStore
 from noir.world.autonomy import apply_autonomy
 from noir.world.state import CaseStartModifiers, PersonRecord, WorldState
@@ -74,9 +77,22 @@ class Phase05App(App):
     TITLE = ""
     SUB_TITLE = ""
     BINDINGS = [
+        ("a", "focus_actions", "Focus actions"),
+        ("l", "focus_list", "Focus list"),
+        ("d", "focus_detail", "Focus detail"),
+        ("w", "focus_log", "Focus wire"),
+        ("i", "focus_input", "Focus input"),
+        ("b", "show_briefing", "Briefing"),
+        ("c", "show_case_file", "Case file"),
+        ("g", "toggle_gaze", "Toggle gaze"),
+        ("escape", "exit_app", "Exit"),
         ("f6", "focus_log", "Focus log"),
         ("f7", "focus_detail", "Focus detail"),
         ("f8", "focus_input", "Focus input"),
+        ("left", "prev_tab", "Previous tab"),
+        ("right", "next_tab", "Next tab"),
+        ("[", "prev_tab", "Previous tab"),
+        ("]", "next_tab", "Next tab"),
     ]
     CSS = """
     Screen {
@@ -86,26 +102,79 @@ class Phase05App(App):
         height: auto;
         padding: 1 1;
     }
-    #log {
+    #tabs {
+        height: auto;
+        padding: 0 1;
+        color: $text-muted;
+    }
+    #body {
+        height: 1fr;
+    }
+    #briefing {
+        height: 1fr;
+    }
+    #briefing_banner {
+        height: auto;
+        padding: 1 1 0 1;
+        text-style: bold;
+        text-align: center;
+    }
+    #briefing_title {
+        height: auto;
+        padding: 0 1 0 1;
+    }
+    #briefing_meta {
+        height: auto;
+        padding: 0 1;
+    }
+    #briefing_snapshot, #briefing_leads {
+        width: 1fr;
+        border: solid $secondary;
+        padding: 0 1;
+    }
+    #briefing_scroll {
         height: 1fr;
         border: solid $secondary;
         padding: 0 1;
     }
-    #detail {
+    #briefing_hint {
+        height: auto;
+        padding: 0 1 1 1;
+        color: $text-muted;
+    }
+    #case_file {
         height: 1fr;
+    }
+    #case_list {
+        width: 40%;
         border: solid $secondary;
-        padding: 0 1;
+        padding: 0 0;
     }
     #detail_view {
         width: 100%;
     }
-    #menu {
-        height: auto;
-        padding: 1 1;
+    #detail {
+        width: 60%;
+        border: solid $secondary;
+        padding: 0 1;
+    }
+    #wire {
+        height: 4;
+        border: solid $secondary;
+        padding: 0 1;
+    }
+    #actions {
+        height: 9;
+        border: solid $secondary;
+        padding: 0 0;
+    }
+    ListItem.disabled {
+        color: $text-muted;
     }
     #command {
         height: 3;
         padding: 0 1;
+        display: none;
     }
     """
 
@@ -116,6 +185,7 @@ class Phase05App(App):
         world_db: Path | None = None,
         case_archetype: CaseArchetype | None = None,
         gaze_mode: GazeMode | None = None,
+        reset_world: bool = False,
     ) -> None:
         super().__init__()
         self.seed = seed if seed is not None else config.SEED
@@ -123,6 +193,8 @@ class Phase05App(App):
         self.base_rng = Rng(self.seed)
         self.case_index = 1
         self.world_store = WorldStore(world_db) if world_db else None
+        if self.world_store and reset_world:
+            self.world_store.reset_world_state()
         self.world = self.world_store.load_world_state() if self.world_store else WorldState()
         self.case_start_tick = self.world.tick
         self.case_archetype = case_archetype
@@ -133,27 +205,69 @@ class Phase05App(App):
         self.state: InvestigationState | None = None
         self.board = DeductionBoard()
         self.prompt_state: PromptState | None = None
+        self.prompt_title: str | None = None
+        self.prompt_lines: list[str] = []
         self.selected_evidence_id = None
         self.last_result = None
         self.profile_lines: list[str] = []
         self._pending_briefing: list[str] = []
         self._pending_intro: list[str] = []
         self._has_mounted = False
+        self._exit_armed_until = 0.0
+        self._tab_order = [
+            ("evidence", "Case File"),
+            ("leads", "Leads"),
+            ("pois", "Scene"),
+            ("profile", "Profile"),
+            ("pattern", "Pattern"),
+            ("summary", "Debrief"),
+        ]
+        self.active_tab = "evidence"
+        self.view_mode = "briefing"
+        self.season = 1
+        self.episode_code = ""
+        self.episode_title = ""
+        self.briefing_title = "Briefing"
+        self.briefing_lines: list[str] = []
+        self._briefing_action_payloads: list[dict[str, Any]] = []
+        self._case_payloads: list[dict[str, Any]] = []
+        self._action_payloads: list[dict[str, Any]] = []
+        self._selected_case_index = 0
+        self._suppress_list_events = False
+        self.pattern_tracker = PatternTracker.from_library(self.base_rng.fork("pattern"))
+        self.last_pattern_addendum = None
 
         self._start_case(self.case_index, case_id_override=self.case_id)
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Static("", id="header")
-            yield RichLog(id="log", wrap=True)
-            yield VerticalScroll(Static("", id="detail_view", expand=True), id="detail")
-            yield Static(self._menu_text(), id="menu")
-            yield Input(placeholder="Enter command (1-7 or q)...", id="command")
+            yield Static("", id="tabs")
+            with Vertical(id="briefing"):
+                yield Static("", id="briefing_banner")
+                yield Static("", id="briefing_title")
+                with Horizontal(id="briefing_meta"):
+                    yield Static("", id="briefing_leads")
+                    yield Static("", id="briefing_snapshot")
+                yield VerticalScroll(Static("", id="briefing_body", expand=True), id="briefing_scroll")
+                yield Static(
+                    "Press any key to begin. Debrief available after case close.",
+                    id="briefing_hint",
+                )
+            with Vertical(id="case_file"):
+                with Horizontal(id="body"):
+                    yield ListView(id="case_list")
+                    yield VerticalScroll(Static("", id="detail_view", expand=True), id="detail")
+                yield RichLog(id="wire", wrap=True)
+                yield ListView(id="actions")
+                yield Input(placeholder="Enter command (1-7 or q)...", id="command")
 
     def on_mount(self) -> None:
-        self._refresh_header()
-        self._refresh_detail(None)
         self._has_mounted = True
+        self._refresh_header()
+        self._refresh_tabs()
+        self._refresh_lists()
+        self._set_view_mode(self.view_mode)
         if self._pending_intro:
             for line in self._pending_intro:
                 self._write(line)
@@ -163,9 +277,10 @@ class Phase05App(App):
             for line in self._pending_briefing:
                 self._write(line)
             self._pending_briefing = []
-        self._write("Type a number to choose an action. Type 'q' to quit.")
-        self._write("Focus: F6 log, F7 detail, F8 input (Tab cycles focus).")
-        self.query_one("#command", Input).focus()
+        self._write("Use the Actions list (Enter) or press I/F8 to type a number. Type 'q' to quit.")
+        self._write("Focus: A actions, L list, D detail, W wire, I input (Tab cycles). G toggles gaze.")
+        if self.view_mode == "case_file":
+            self.query_one("#actions", ListView).focus()
 
     def on_unmount(self) -> None:
         if self.world_store:
@@ -185,30 +300,206 @@ class Phase05App(App):
             return
         self._handle_command(value)
 
-    def _menu_text(self) -> str:
-        return (
-            "Choose action:\n"
-            "1) Visit scene\n"
-            "2) Interview witness\n"
-            "3) Request CCTV\n"
-            "4) Submit forensics\n"
-            "5) Set hypothesis\n"
-            "6) Profiling summary\n"
-            "7) Arrest"
-        )
+    def on_key(self, event) -> None:
+        if self.view_mode != "briefing" or self.prompt_state is not None:
+            return
+        if event.key == "q":
+            self.exit()
+            return
+        if event.key == "escape":
+            self.action_exit_app()
+            return
+        if event.key in {"tab", "shift+tab"}:
+            return
+        if event.key.startswith("f"):
+            return
+        self._set_view_mode("case_file")
+
+    def action_exit_app(self) -> None:
+        now = time.monotonic()
+        if now <= self._exit_armed_until:
+            self.exit()
+            return
+        self._exit_armed_until = now + 2.0
+        message = "Press ESC again to quit."
+        if self.view_mode == "briefing":
+            if message not in self.briefing_lines:
+                self.briefing_lines.append(message)
+                if self._has_mounted:
+                    self._refresh_briefing()
+        self._write(message)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if self._suppress_list_events:
+            return
+        list_view = getattr(event, "list_view", event.control)
+        if list_view.id == "actions":
+            index = list_view.index
+            if index is None or index >= len(self._action_payloads):
+                return
+            payload = self._action_payloads[index]
+            if not payload.get("enabled", True):
+                self._write("Action unavailable.")
+                return
+            self._handle_command(payload["cmd"])
+            return
+        if list_view.id == "case_list":
+            index = list_view.index
+            if index is None or index >= len(self._case_payloads):
+                return
+            self._selected_case_index = index
+            payload = self._case_payloads[index]
+            if payload.get("type") == "evidence":
+                self.selected_evidence_id = payload.get("id")
+            self._refresh_detail(None)
 
     def _write(self, message: str) -> None:
-        log = self.query_one("#log", RichLog)
+        log = self.query_one("#wire", RichLog)
         log.write(message)
 
     def action_focus_log(self) -> None:
-        self.query_one("#log", RichLog).focus()
+        self.query_one("#wire", RichLog).focus()
 
     def action_focus_detail(self) -> None:
         self.query_one("#detail", VerticalScroll).focus()
 
+    def action_focus_actions(self) -> None:
+        self.query_one("#actions", ListView).focus()
+
+    def action_focus_list(self) -> None:
+        self.query_one("#case_list", ListView).focus()
+
     def action_focus_input(self) -> None:
         self.query_one("#command", Input).focus()
+
+    def action_show_briefing(self) -> None:
+        self._set_view_mode("briefing")
+
+    def action_show_case_file(self) -> None:
+        self._set_view_mode("case_file")
+
+    def action_toggle_gaze(self) -> None:
+        if self.gaze_mode == GazeMode.FORENSIC:
+            self.gaze_mode = GazeMode.BEHAVIORAL
+        else:
+            self.gaze_mode = GazeMode.FORENSIC
+        self._write(f"Gaze set to {gaze_label(self.gaze_mode)}.")
+        self._refresh_header()
+        self._refresh_detail(None)
+
+    def action_prev_tab(self) -> None:
+        index = self._tab_index(self.active_tab)
+        self.active_tab = self._tab_order[index - 1][0]
+        self._refresh_tabs()
+        self._refresh_lists()
+
+    def action_next_tab(self) -> None:
+        index = self._tab_index(self.active_tab)
+        self.active_tab = self._tab_order[(index + 1) % len(self._tab_order)][0]
+        self._refresh_tabs()
+        self._refresh_lists()
+
+    def _tab_index(self, key: str) -> int:
+        for idx, (tab_key, _) in enumerate(self._tab_order):
+            if tab_key == key:
+                return idx
+        return 0
+
+    def _refresh_tabs(self) -> None:
+        tabs = self.query_one("#tabs", Static)
+        labels = []
+        for key, label in self._tab_order:
+            if key == self.active_tab:
+                labels.append(f"[bold reverse]{label}[/]")
+            else:
+                labels.append(label)
+        tabs.update("Tabs: " + "  ".join(labels))
+
+    def _refresh_lists(self) -> None:
+        self._refresh_briefing()
+        self._refresh_case_list()
+        self._refresh_actions()
+        self._refresh_detail(None)
+
+    def _set_view_mode(self, mode: str) -> None:
+        if mode not in {"briefing", "case_file"}:
+            mode = "case_file"
+        self.view_mode = mode
+        if not self._has_mounted:
+            return
+        briefing = self.query_one("#briefing", Vertical)
+        case_file = self.query_one("#case_file", Vertical)
+        tabs = self.query_one("#tabs", Static)
+        briefing.display = mode == "briefing"
+        case_file.display = mode == "case_file"
+        tabs.display = mode == "case_file"
+        if mode == "briefing":
+            self._refresh_briefing()
+            self.query_one("#briefing_scroll", VerticalScroll).focus()
+        else:
+            self.query_one("#actions", ListView).focus()
+
+    def _refresh_briefing(self) -> None:
+        if not self._has_mounted:
+            return
+        banner = self.query_one("#briefing_banner", Static)
+        title = self.query_one("#briefing_title", Static)
+        body = self.query_one("#briefing_body", Static)
+        title.update(self.briefing_title or "Briefing")
+        banner_text = "EPISODE"
+        if self.episode_code and self.episode_title:
+            banner_text = f"EPISODE: {self.episode_code} — {self.episode_title}"
+        elif self.episode_title:
+            banner_text = f"EPISODE: {self.episode_title}"
+        rule_len = max(28, len(banner_text) + 8)
+        rule = "-" * rule_len
+        banner.update(f"{rule}\n{banner_text}\n{rule}")
+        snapshot = self.query_one("#briefing_snapshot", Static)
+        leads_box = self.query_one("#briefing_leads", Static)
+        snapshot_lines = [
+            "Case snapshot",
+            f"District: {self.district}",
+            f"Location: {self.location_name}",
+            f"Pressure: {self.state.pressure}/{PRESSURE_LIMIT}",
+            f"Trust: {self.state.trust}/{TRUST_LIMIT}",
+        ]
+        snapshot.update("\n".join(snapshot_lines))
+        lead_lines = ["Key leads"]
+        lead_count = 0
+        for lead in self.state.leads:
+            if lead_count >= 2:
+                break
+            lead_lines.append(f"- {lead.label} (t{lead.deadline})")
+            lead_count += 1
+        if lead_count == 0:
+            lead_lines.append("(none)")
+        leads_box.update("\n".join(lead_lines))
+        if self.briefing_lines:
+            body.update("\n".join(self.briefing_lines))
+        else:
+            body.update("(no briefing available)")
+
+    def _set_prompt_active(self, active: bool) -> None:
+        command = self.query_one("#command", Input)
+        log = self.query_one("#wire", RichLog)
+        command.display = active
+        log.display = not active
+        if active:
+            command.focus()
+        else:
+            command.value = ""
+            self._clear_prompt_view()
+            self.query_one("#actions", ListView).focus()
+
+    def _set_prompt(self, title: str, lines: list[str]) -> None:
+        self.prompt_title = title
+        self.prompt_lines = lines
+        self._refresh_detail(None)
+
+    def _clear_prompt_view(self) -> None:
+        self.prompt_title = None
+        self.prompt_lines = []
+        self._refresh_detail(None)
 
     def _refresh_header(self) -> None:
         header = self.query_one("#header", Static)
@@ -216,7 +507,7 @@ class Phase05App(App):
             f"Case: {self.truth.case_id}  Investigation Time {self.state.time}/{TIME_LIMIT}  "
             f"Pressure {self.state.pressure}/{PRESSURE_LIMIT}  "
             f"Trust {self.state.trust}/{TRUST_LIMIT}  "
-            f"Gaze {gaze_label(self.gaze_mode)}"
+            f"Gaze {gaze_label(self.gaze_mode)} (G: toggle)"
         )
         lines = [time_line]
         scene_mode = None
@@ -239,78 +530,245 @@ class Phase05App(App):
     def _refresh_detail(self, result) -> None:
         detail = self.query_one("#detail_view", Static)
         lines: list[str] = []
-        lines.append("Detail")
-        lines.append(f"Evidence known: {len(self.state.knowledge.known_evidence)}/{len(self.presentation.evidence)}")
-        lead_lines = self._lead_lines()
-        if lead_lines and lead_lines != ["(none)"]:
-            lines.append(f"Leads ({len(lead_lines)})")
-            for line in lead_lines[:2]:
-                lines.append(f"- {line}")
-            if len(lead_lines) > 2:
-                lines.append(f"- ... +{len(lead_lines) - 2} more")
-        neighbor_lines = self._neighbor_lead_lines()
-        if neighbor_lines and neighbor_lines != ["(none)"]:
-            lines.append(f"Neighbor leads ({len(neighbor_lines)})")
-            for line in neighbor_lines[:2]:
-                lines.append(f"- {line}")
-            if len(neighbor_lines) > 2:
-                lines.append(f"- ... +{len(neighbor_lines) - 2} more")
-        if self.state.scene_pois:
-            lines.append(f"Scene POIs ({len(self.state.scene_pois)})")
-            body_line = None
-            for poi in self.state.scene_pois:
-                if poi.poi_id == self.state.body_poi_id:
-                    status = "visited" if poi.poi_id in self.state.visited_poi_ids else "unvisited"
-                    body_line = f"{self._poi_display_line(poi)} ({status})"
-                    break
-            shown = 0
-            if body_line:
-                lines.append(f"- {body_line}")
-                shown = 1
+        if self.prompt_state is not None:
+            lines.append(self.prompt_title or "Prompt")
+            if self.prompt_lines:
+                lines.extend(self.prompt_lines)
             else:
-                for poi in self.state.scene_pois[:2]:
-                    status = "visited" if poi.poi_id in self.state.visited_poi_ids else "unvisited"
-                    lines.append(f"- {self._poi_display_line(poi)} ({status})")
-                    shown += 1
-            remaining = len(self.state.scene_pois) - shown
-            if remaining > 0:
-                lines.append(f"- ... +{remaining} more (use Visit scene to list)")
-        if self.profile_lines:
+                lines.append("Awaiting selection...")
+            lines.append("")
+            lines.append("Enter selection in input (I/F8).")
+            detail.update("\n".join(lines))
+            return
+        payload = None
+        if self._case_payloads:
+            index = min(self._selected_case_index, len(self._case_payloads) - 1)
+            payload = self._case_payloads[index]
+        if self.active_tab == "evidence":
+            lines.append("Evidence detail")
+            if payload and payload.get("type") == "evidence":
+                evidence_id = payload.get("id")
+                item = next(
+                    (e for e in self.presentation.evidence if e.id == evidence_id),
+                    None,
+                )
+                if item is not None:
+                    detail_lines = self._format_evidence_detail(1, item)
+                    if detail_lines and detail_lines[0].startswith("1) "):
+                        detail_lines[0] = detail_lines[0][3:]
+                    lines.extend(detail_lines)
+                else:
+                    lines.append("No evidence selected.")
+            else:
+                lines.append("No evidence selected.")
+        elif self.active_tab == "leads":
+            lines.append("Lead detail")
+            if payload and payload.get("type") == "lead":
+                lead = payload.get("lead")
+                status = lead.status.value if lead else "unknown"
+                lines.append(f"{lead.label} ({status})")
+                lines.append(f"Action: {lead.action_hint}")
+                lines.append(f"Deadline: t{lead.deadline}")
+            elif payload and payload.get("type") == "neighbor_lead":
+                lead = payload.get("lead")
+                lines.append(payload.get("label", "Neighbor lead"))
+                if lead:
+                    lines.append(f"Hearing bias: {lead.hearing_bias:.2f}")
+            else:
+                lines.append("No lead selected.")
+        elif self.active_tab == "pois":
+            lines.append("Scene detail")
+            if payload and payload.get("type") == "poi":
+                poi = payload.get("poi")
+                status = "visited" if poi.poi_id in self.state.visited_poi_ids else "unvisited"
+                lines.append(f"{self._poi_display_label(poi)} ({status})")
+                if poi.description:
+                    lines.append(normalize_line(poi.description))
+                if poi.tags:
+                    lines.append(f"Tags: {', '.join(poi.tags[:4])}")
+            else:
+                lines.append("No scene area selected.")
+        elif self.active_tab == "profile":
             lines.append("Profiling summary")
-            for line in self.profile_lines[:4]:
-                lines.append(line)
-            if len(self.profile_lines) > 4:
-                lines.append(f"... +{len(self.profile_lines) - 4} more")
-        last_result = result or self.last_result
-        if last_result is not None:
-            lines.append("")
-            lines.append(f"Last action: {last_result.action}")
-            lines.append(last_result.summary)
-            for note in last_result.notes:
-                lines.append(f"- {note}")
-        known_ids = list(self.state.knowledge.known_evidence)
-        if known_ids:
-            lines.append("")
-            lines.append(f"Evidence (known) ({len(known_ids)})")
-            for idx, evidence_id in enumerate(known_ids[:3], start=1):
+            if self.profile_lines:
+                lines.extend(self.profile_lines)
+            else:
+                lines.append("(none)")
+        elif self.active_tab == "pattern":
+            lines.append("Pattern addendum")
+            if payload and payload.get("type") == "pattern":
+                addendum = payload.get("addendum")
+                if addendum:
+                    lines.extend(addendum.render())
+                else:
+                    lines.append("(none)")
+            else:
+                lines.append("(none)")
+        elif self.active_tab == "summary":
+            lines.append("Debrief")
+            if payload and payload.get("key") == "case":
+                lines.append(f"Case: {self.truth.case_id}")
+                lines.append(f"District: {self.district}")
+                lines.append(f"Location: {self.location_name}")
+                scene_layout = self.case_facts.get("scene_layout")
+                if isinstance(scene_layout, dict):
+                    mode = scene_layout.get("mode")
+                    if mode:
+                        lines.append(f"Scene mode: {mode}")
+                if self.last_pattern_addendum:
+                    lines.append(f"Pattern: {self.last_pattern_addendum.label}")
+            elif payload and payload.get("key") == "last_action":
+                last_result = result or self.last_result
+                if last_result is None:
+                    lines.append("(no actions yet)")
+                else:
+                    lines.append(f"Last action: {last_result.action}")
+                    lines.append(last_result.summary)
+                    for note in last_result.notes:
+                        lines.append(f"- {note}")
+            elif payload and payload.get("key") == "pattern":
+                lines.append("Pattern addendum")
+                if self.last_pattern_addendum:
+                    lines.extend(self.last_pattern_addendum.render())
+                else:
+                    lines.append("(none)")
+            elif payload and payload.get("key") == "world":
+                context_lines = self.world.context_lines(self.district, self.location_name)
+                if context_lines:
+                    lines.extend(context_lines)
+                else:
+                    lines.append("(no world notes)")
+            else:
+                lines.append("(select a summary item)")
+        detail.update("\n".join(lines))
+
+    def _format_evidence_summary(self, item) -> str:
+        summary = normalize_line(item.summary)
+        return f"{summary} ({self._format_confidence(item.confidence)})"
+
+    def _refresh_case_list(self) -> None:
+        list_view = self.query_one("#case_list", ListView)
+        payloads: list[dict[str, Any]] = []
+
+        if self.active_tab == "evidence":
+            known_ids = list(self.state.knowledge.known_evidence)
+            for evidence_id in known_ids:
                 item = next(
                     (e for e in self.presentation.evidence if e.id == evidence_id),
                     None,
                 )
                 if item is None:
                     continue
-                lines.append(f"- {self._format_evidence(idx, item)}")
-            if len(known_ids) > 3:
-                lines.append(f"- ... +{len(known_ids) - 3} more")
-            selected = self._selected_evidence()
-            if selected is not None:
-                lines.append("")
-                lines.append("Selected evidence")
-                detail_lines = self._format_evidence_detail(1, selected)
-                if detail_lines and detail_lines[0].startswith("1) "):
-                    detail_lines[0] = detail_lines[0][3:]
-                lines.extend(detail_lines)
-        detail.update("\n".join(lines))
+                payloads.append(
+                    {
+                        "type": "evidence",
+                        "id": evidence_id,
+                        "label": self._format_evidence_summary(item),
+                    }
+                )
+        elif self.active_tab == "leads":
+            for lead in self.state.leads:
+                status = lead.status.value
+                payloads.append(
+                    {
+                        "type": "lead",
+                        "lead": lead,
+                        "label": f"{lead.label} ({status})",
+                    }
+                )
+            for lead in self.state.neighbor_leads:
+                payloads.append(
+                    {
+                        "type": "neighbor_lead",
+                        "lead": lead,
+                        "label": f"Neighbor: {format_neighbor_lead(lead)}",
+                    }
+                )
+        elif self.active_tab == "pois":
+            for poi in self.state.scene_pois:
+                status = "visited" if poi.poi_id in self.state.visited_poi_ids else "unvisited"
+                payloads.append(
+                    {
+                        "type": "poi",
+                        "poi": poi,
+                        "label": f"{self._poi_display_label(poi)} ({status})",
+                    }
+                )
+        elif self.active_tab == "profile":
+            if self.profile_lines:
+                for idx, line in enumerate(self.profile_lines):
+                    payloads.append(
+                        {
+                            "type": "profile",
+                            "index": idx,
+                            "label": line,
+                        }
+                    )
+        elif self.active_tab == "pattern":
+            if self.last_pattern_addendum:
+                payloads = [
+                    {
+                        "type": "pattern",
+                        "label": f"Case {self.last_pattern_addendum.case_id}",
+                        "addendum": self.last_pattern_addendum,
+                    }
+                ]
+            else:
+                payloads = [{"type": "empty", "label": "(none)"}]
+        elif self.active_tab == "summary":
+            payloads = [
+                {"type": "summary", "key": "case", "label": "Case status"},
+                {"type": "summary", "key": "last_action", "label": "Last action"},
+                {"type": "summary", "key": "pattern", "label": "Pattern addendum"},
+                {"type": "summary", "key": "world", "label": "World context"},
+            ]
+
+        if not payloads:
+            payloads = [{"type": "empty", "label": "(none)"}]
+
+        self._suppress_list_events = True
+        list_view.clear()
+        self._case_payloads = payloads
+        for payload in payloads:
+            item = ListItem(Static(payload["label"]))
+            if payload.get("type") == "empty":
+                item.add_class("disabled")
+            list_view.append(item)
+        if payloads:
+            index = min(self._selected_case_index, len(payloads) - 1)
+            self._selected_case_index = index
+            list_view.index = index
+        self._suppress_list_events = False
+
+    def _build_action_items(self) -> list[dict[str, Any]]:
+        has_witness = any(
+            RoleTag.WITNESS in person.role_tags for person in self.truth.people.values()
+        )
+        has_evidence = bool(self.state.knowledge.known_evidence)
+        has_hypothesis = self.board.hypothesis is not None
+        return [
+            {"cmd": "1", "label": "Visit scene", "enabled": True},
+            {"cmd": "2", "label": "Interview witness", "enabled": has_witness},
+            {"cmd": "3", "label": "Request CCTV", "enabled": True},
+            {"cmd": "4", "label": "Submit forensics", "enabled": True},
+            {"cmd": "5", "label": "Set hypothesis", "enabled": has_evidence},
+            {"cmd": "6", "label": "Profiling summary", "enabled": True},
+            {"cmd": "7", "label": "Arrest suspect", "enabled": has_hypothesis},
+        ]
+
+    def _refresh_actions(self) -> None:
+        list_view = self.query_one("#actions", ListView)
+        self._action_payloads = self._build_action_items()
+        self._suppress_list_events = True
+        list_view.clear()
+        for payload in self._action_payloads:
+            item = ListItem(Static(payload["label"]))
+            if not payload["enabled"]:
+                item.add_class("disabled")
+            list_view.append(item)
+        if self._action_payloads:
+            list_view.index = 0
+        self._suppress_list_events = False
 
     def _format_evidence(self, index: int, item) -> str:
         return f"{index}) {item.summary} ({item.evidence_type}, {item.confidence})"
@@ -399,7 +857,7 @@ class Phase05App(App):
         mapping = {
             InterviewApproach.BASELINE: "Baseline (rapport)",
             InterviewApproach.PRESSURE: "Pressure (challenge)",
-            InterviewApproach.THEME: "Theme framing",
+            InterviewApproach.THEME: "Motive framing",
         }
         return mapping.get(approach, approach.value)
 
@@ -477,6 +935,28 @@ class Phase05App(App):
             lines.append(f"{idx}) {lead.label} - {status} ({lead.action_hint})")
         return lines
 
+    def _wire_evidence_line(self, item) -> str:
+        confidence = self._format_confidence(item.confidence)
+        label = normalize_line(item.summary)
+        extra = ""
+        if isinstance(item, WitnessStatement):
+            if item.observed_person_ids:
+                person = self.truth.people.get(item.observed_person_ids[0])
+                if person:
+                    extra = person.name
+        elif isinstance(item, CCTVReport):
+            if item.observed_person_ids:
+                person = self.truth.people.get(item.observed_person_ids[0])
+                if person:
+                    extra = person.name
+        elif isinstance(item, ForensicObservation):
+            poi_label = self._poi_label_for(item.poi_id)
+            if poi_label:
+                extra = poi_label
+        if extra:
+            return f"- New evidence: {label} ({confidence}) - {extra}"
+        return f"- New evidence: {label} ({confidence})"
+
     def _witness_note(self, item: WitnessStatement) -> str | None:
         if item.observed_person_ids:
             person_id = item.observed_person_ids[0]
@@ -510,7 +990,8 @@ class Phase05App(App):
     def _poi_display_line(self, poi: ScenePOI) -> str:
         label = self._poi_display_label(poi)
         if poi.description:
-            return f"{label}: {poi.description}"
+            description = normalize_line(poi.description)
+            return f"{label}: {description}"
         return label
 
     def _poi_lines(self) -> list[str]:
@@ -600,9 +1081,11 @@ class Phase05App(App):
             ]
             if unvisited:
                 self.prompt_state = PromptState(step="visit_poi", options=unvisited)
-                self._write("Choose a scene area to inspect:")
+                lines = ["Choose a scene area to inspect:"]
                 for idx, poi in enumerate(unvisited, start=1):
-                    self._write(f"{idx}) {self._poi_display_line(poi)}")
+                    lines.append(f"{idx}) {self._poi_display_line(poi)}")
+                self._set_prompt("Scene inspection", lines)
+                self._set_prompt_active(True)
                 return
             result = visit_scene(self.truth, self.presentation, self.state, self.location_id)
             self._apply_action_result(result)
@@ -673,56 +1156,7 @@ class Phase05App(App):
         else:
             self._write(f"[{result.action}] {result.summary}")
         for item in result.revealed:
-            if isinstance(item, WitnessStatement):
-                self._write("- New evidence: Witness statement")
-                lines = format_witness_lines(
-                    self._format_time_phrase(item.reported_time_window),
-                    item.statement,
-                    self._witness_note(item),
-                    self._format_confidence(item.confidence),
-                    list(item.uncertainty_hooks),
-                    self.gaze_mode,
-                )
-                for line in lines:
-                    self._write(f"  {line}")
-            elif isinstance(item, ForensicObservation):
-                self._write(f"- New evidence: {item.summary}")
-                poi_label = self._poi_label_for(item.poi_id)
-                if poi_label:
-                    self._write(f"  Location: {poi_label}")
-                tod_phrase = self._format_time_phrase(item.tod_window) if item.tod_window else None
-                lines = format_forensic_lines(
-                    item.observation,
-                    self._format_confidence(item.confidence),
-                    tod_phrase,
-                    item.stage_hint,
-                    self.gaze_mode,
-                )
-                for line in lines:
-                    self._write(f"  {line}")
-            elif isinstance(item, CCTVReport):
-                self._write(f"- New evidence: {item.summary}")
-                lines = format_cctv_lines(
-                    item.summary,
-                    self._format_time_phrase(item.time_window),
-                    self._cctv_note(item),
-                    self._format_confidence(item.confidence),
-                    self.gaze_mode,
-                )
-                for line in lines:
-                    self._write(f"  {line}")
-            elif isinstance(item, ForensicsResult):
-                self._write(f"- New evidence: {item.summary}")
-                lines = format_forensics_result_lines(
-                    item.finding,
-                    item.method_category,
-                    self._format_confidence(item.confidence),
-                    self.gaze_mode,
-                )
-                for line in lines:
-                    self._write(f"  {line}")
-            else:
-                self._write(f"- New evidence: {item.summary} ({item.evidence_type}, {item.confidence})")
+            self._write(self._wire_evidence_line(item))
         for note in result.notes:
             self._write(f"- {note}")
         if result.revealed:
@@ -731,7 +1165,7 @@ class Phase05App(App):
             self.selected_evidence_id = self.state.knowledge.known_evidence[0]
         self.last_result = result
         self._refresh_header()
-        self._refresh_detail(result)
+        self._refresh_lists()
 
     def _finalize_arrest(self) -> None:
         self.board.sync_from_state(self.state)
@@ -771,6 +1205,14 @@ class Phase05App(App):
         end_rng = self.base_rng.fork(f"end-{self.case_index}")
         for line in build_end_tag(end_rng, outcome.arrest_result.value):
             self._write(line)
+        pattern_addendum = self.pattern_tracker.record_case(
+            self.truth.case_id, self.case_index
+        )
+        if pattern_addendum:
+            self.last_pattern_addendum = pattern_addendum
+            self._write("Pattern addendum filed.")
+        else:
+            self.last_pattern_addendum = None
         self.case_index += 1
         self.case_start_tick = self.world.tick
         self._start_case(self.case_index)
@@ -796,10 +1238,29 @@ class Phase05App(App):
         if case_index == 1:
             intro_lines.extend(build_previously_on(self.world))
         episode_rng = self.base_rng.fork(f"episode-{case_index}")
-        episode_title = build_episode_title(episode_rng, self.location_name, self.district)
-        intro_lines.append(f"Episode: {episode_title}")
+        case_archetype = self.case_facts.get("case_archetype") if isinstance(self.case_facts, dict) else None
+        episode_kind = "copycat" if case_archetype == CaseArchetype.PATTERN.value else "normal"
+        tag_map = {
+            CaseArchetype.PRESSURE.value: ["pressure", "escalation"],
+            CaseArchetype.PATTERN.value: ["recurrence", "copycat"],
+            CaseArchetype.CHARACTER.value: ["identity", "personal"],
+            CaseArchetype.FORESHADOWING.value: ["recurrence", "escalation"],
+        }
+        case_tags = tag_map.get(case_archetype, [])
+        episode_title = build_episode_title(
+            episode_rng,
+            self.location_name,
+            self.district,
+            episode_kind=episode_kind,
+            case_tags=case_tags,
+            title_state=self.world.episode_titles,
+        )
+        self.episode_code = f"S{self.season}E{case_index}"
+        self.episode_title = episode_title
+        intro_lines.append(f"Episode: {self.episode_code} — {episode_title}")
         intro_lines.extend(build_cold_open(episode_rng, self.location_name))
         intro_lines.extend(build_partner_line(episode_rng))
+        briefing_lines = [line for line in intro_lines if not line.startswith("Episode:")]
         if intro_lines:
             if self._has_mounted:
                 for line in intro_lines:
@@ -809,6 +1270,11 @@ class Phase05App(App):
         self.case_modifiers = self.world.case_start_modifiers(
             self.district, self.location_name
         )
+        briefing_lines.extend(self.case_modifiers.briefing_lines)
+        if self.last_pattern_addendum:
+            briefing_lines.append(
+                f"Pattern file updated: {self.last_pattern_addendum.label}."
+            )
         has_returning = self.world.has_returning_person(
             self.truth.people, self.truth.case_id
         )
@@ -849,6 +1315,13 @@ class Phase05App(App):
                     self._write(line)
             else:
                 self._pending_briefing = list(self.case_modifiers.briefing_lines)
+        self.briefing_title = "CASE BRIEFING"
+        self.briefing_lines = briefing_lines
+        self.view_mode = "briefing"
+        if self._has_mounted:
+            self._refresh_tabs()
+            self._refresh_lists()
+            self._set_view_mode(self.view_mode)
 
     def _interview_witness(self):
         witnesses = [p for p in self.truth.people.values() if RoleTag.WITNESS in p.role_tags]
@@ -861,14 +1334,18 @@ class Phase05App(App):
                 data={"witness_id": witnesses[0].id},
                 options=list(InterviewApproach),
             )
-            self._write("Choose interview approach:")
+            lines = ["Choose interview approach:"]
             for idx, approach in enumerate(self.prompt_state.options, start=1):
-                self._write(f"{idx}) {self._interview_approach_label(approach)}")
+                lines.append(f"{idx}) {self._interview_approach_label(approach)}")
+            self._set_prompt("Interview approach", lines)
+            self._set_prompt_active(True)
             return None
         self.prompt_state = PromptState(step="interview_witness", options=witnesses)
-        self._write("Choose a witness:")
+        lines = ["Choose a witness:"]
         for idx, person in enumerate(witnesses, start=1):
-            self._write(f"{idx}) {person.name}")
+            lines.append(f"{idx}) {person.name}")
+        self._set_prompt("Select witness", lines)
+        self._set_prompt_active(True)
         return None
 
     def _start_hypothesis_prompt(self) -> None:
@@ -878,9 +1355,11 @@ class Phase05App(App):
             self._write("No suspect available.")
             return
         self.prompt_state = PromptState(step="hyp_suspect", options=suspects)
-        self._write("Set hypothesis. Choose suspect:")
+        lines = ["Choose a suspect:"]
         for idx, person in enumerate(suspects, start=1):
-            self._write(f"{idx}) {person.name}")
+            lines.append(f"{idx}) {person.name}")
+        self._set_prompt("Hypothesis suspect", lines)
+        self._set_prompt_active(True)
 
     def _handle_prompt_input(self, value: str) -> None:
         if self.prompt_state is None:
@@ -888,6 +1367,7 @@ class Phase05App(App):
         if value.lower() == "q":
             self._write("Prompt cancelled.")
             self.prompt_state = None
+            self._set_prompt_active(False)
             return
         step = self.prompt_state.step
         if step == "interview_witness":
@@ -901,9 +1381,10 @@ class Phase05App(App):
                 data={"witness_id": person.id},
                 options=list(InterviewApproach),
             )
-            self._write("Choose interview approach:")
+            lines = ["Choose interview approach:"]
             for idx, approach in enumerate(self.prompt_state.options, start=1):
-                self._write(f"{idx}) {self._interview_approach_label(approach)}")
+                lines.append(f"{idx}) {self._interview_approach_label(approach)}")
+            self._set_prompt("Interview approach", lines)
             return
         if step == "interview_approach":
             selection = self._parse_choice(value, len(self.prompt_state.options))
@@ -915,12 +1396,14 @@ class Phase05App(App):
             if approach == InterviewApproach.THEME:
                 self.prompt_state.step = "interview_theme"
                 self.prompt_state.options = list(InterviewTheme)
-                self._write("Choose framing theme:")
+                lines = ["Choose motive framing:"]
                 for idx, theme in enumerate(self.prompt_state.options, start=1):
-                    self._write(f"{idx}) {self._interview_theme_label(theme)}")
+                    lines.append(f"{idx}) {self._interview_theme_label(theme)}")
+                self._set_prompt("Motive framing", lines)
                 return
             witness_id = self.prompt_state.data["witness_id"]
             self.prompt_state = None
+            self._set_prompt_active(False)
             result = interview(
                 self.truth,
                 self.presentation,
@@ -940,6 +1423,7 @@ class Phase05App(App):
             witness_id = self.prompt_state.data["witness_id"]
             approach = self.prompt_state.data.get("approach", InterviewApproach.THEME)
             self.prompt_state = None
+            self._set_prompt_active(False)
             result = interview(
                 self.truth,
                 self.presentation,
@@ -958,6 +1442,7 @@ class Phase05App(App):
                 return
             poi = self.prompt_state.options[selection]
             self.prompt_state = None
+            self._set_prompt_active(False)
             result = visit_scene(
                 self.truth,
                 self.presentation,
@@ -977,9 +1462,10 @@ class Phase05App(App):
             self.prompt_state.data["suspect_id"] = self.prompt_state.options[selection].id
             self.prompt_state.step = "hyp_claims"
             self.prompt_state.options = list(ClaimType)
-            self._write("Choose 1 to 3 claims (comma-separated):")
+            lines = ["Choose 1 to 3 claims (comma-separated):"]
             for idx, claim in enumerate(self.prompt_state.options, start=1):
-                self._write(f"{idx}) {self._format_claim(claim)}")
+                lines.append(f"{idx}) {self._format_claim(claim)}")
+            self._set_prompt("Hypothesis claims", lines)
             return
         if step == "hyp_claims":
             indices = self._parse_multi_choice(value, len(self.prompt_state.options))
@@ -996,66 +1482,22 @@ class Phase05App(App):
             if not evidence_items:
                 self._write("No evidence collected yet.")
                 self.prompt_state = None
+                self._set_prompt_active(False)
                 return
-            self._write("Choose 1 to 3 evidence items (comma-separated):")
+            lines = ["Choose 1 to 3 evidence items (comma-separated):"]
             for idx, item in enumerate(evidence_items, start=1):
-                if isinstance(item, WitnessStatement):
-                    self._write(f"{idx}) Witness statement")
-                    lines = format_witness_lines(
-                        self._format_time_phrase(item.reported_time_window),
-                        item.statement,
-                        self._witness_note(item),
-                        self._format_confidence(item.confidence),
-                        list(item.uncertainty_hooks),
-                        self.gaze_mode,
-                    )
-                    for line in lines:
-                        self._write(f"   {line}")
-                elif isinstance(item, ForensicObservation):
-                    self._write(f"{idx}) {item.summary}")
-                    poi_label = self._poi_label_for(item.poi_id)
-                    if poi_label:
-                        self._write(f"   Location: {poi_label}")
-                    tod_phrase = (
-                        self._format_time_phrase(item.tod_window) if item.tod_window else None
-                    )
-                    lines = format_forensic_lines(
-                        item.observation,
-                        self._format_confidence(item.confidence),
-                        tod_phrase,
-                        item.stage_hint,
-                        self.gaze_mode,
-                    )
-                    for line in lines:
-                        self._write(f"   {line}")
-                elif isinstance(item, CCTVReport):
-                    self._write(f"{idx}) {item.summary}")
-                    lines = format_cctv_lines(
-                        item.summary,
-                        self._format_time_phrase(item.time_window),
-                        self._cctv_note(item),
-                        self._format_confidence(item.confidence),
-                        self.gaze_mode,
-                    )
-                    for line in lines:
-                        self._write(f"   {line}")
-                elif isinstance(item, ForensicsResult):
-                    self._write(f"{idx}) {item.summary}")
-                    lines = format_forensics_result_lines(
-                        item.finding,
-                        item.method_category,
-                        self._format_confidence(item.confidence),
-                        self.gaze_mode,
-                    )
-                    for line in lines:
-                        self._write(f"   {line}")
-                else:
-                    self._write(f"{idx}) {item.summary} ({item.evidence_type}, {item.confidence})")
+                detail_lines = self._format_evidence_detail(idx, item)
+                lines.extend(detail_lines)
+                lines.append("")
+            if lines and lines[-1] == "":
+                lines.pop()
+            self._set_prompt("Hypothesis evidence", lines)
             return
         if step == "hyp_evidence":
             evidence_ids = self._parse_indices(value, self.prompt_state.options)
             data = self.prompt_state.data
             self.prompt_state = None
+            self._set_prompt_active(False)
             result = set_hypothesis(
                 self.state,
                 self.board,

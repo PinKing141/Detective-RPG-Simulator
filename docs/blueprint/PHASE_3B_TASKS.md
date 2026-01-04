@@ -14,7 +14,7 @@ Phase 3B is not:
 - Rapport and resistance as costs and risks.
 - Lies are explicit and motive-driven, not random noise.
 - Statements become evidence with confidence bands.
-- Theme framing choices (minimization) as a pressure tool.
+- Motive framing choices (minimization) as a pressure tool.
 - Baseline profile metrics tracked (sentence length, tense, pronoun ratio).
 - Linguistic tell cues are template-based only (no NLP yet).
 - Baseline metrics are used only for uncertainty hooks.

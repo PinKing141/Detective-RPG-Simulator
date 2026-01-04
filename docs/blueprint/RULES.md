@@ -43,6 +43,16 @@ This is the design contract. If a feature conflicts with these rules, the featur
 - Pattern updates render as case-file addenda, not raw lists.
 - POI anchors are descriptive only; no micro-traversal UI in Phase 3A.
 - Scene generation uses top-down by default; bottom-up only for character or pattern cases.
+- Nemesis capture gates must be visible (pattern status + operational readiness), not hidden thresholds.
+- Nemesis escapes must be legible and tied to player choices; no random getaways.
+- Every nemesis miss must yield a concrete gain (new constraint, motif detail, or narrowed zone).
+- Nemesis appearances are capped to avoid serial fatigue; rarity is part of the tension.
+- Pattern absence weakens confidence but never disproves recurrence.
+- Single-motif matches never advance a pattern state.
+- Motif drift is non-adaptive and non-reactive.
+- Pattern language is capped to the Phase 3D escalation ladder.
+- False positives must map to a clear source category.
+- Pattern updates must use the case-file addendum template.
 
 ## Phase 4 guardrails
 - Endings reflect behavior under pressure, not correctness or scores.

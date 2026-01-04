@@ -29,6 +29,7 @@ from noir.presentation.evidence import EvidenceItem, PresentationCase, WitnessSt
 from noir.presentation.erosion import fuzz_time
 from noir.truth.simulator import apply_action
 from noir.truth.graph import TruthState
+from noir.util.grammar import place_with_article
 from noir.util.rng import Rng
 
 
@@ -247,7 +248,8 @@ def interview(
     base_window = base_statement.reported_time_window if base_statement else None
     kill_event = _kill_event(truth)
     location = truth.locations.get(location_id)
-    location_name = location.name if location else "the location"
+    location_name = location.name if location else "location"
+    place = place_with_article(location_name)
     suspect = next(
         (person for person in truth.people.values() if RoleTag.OFFENDER in person.role_tags),
         None,
@@ -285,9 +287,9 @@ def interview(
         if not revealed and kill_event and not witness_statements:
             rng = _interview_rng(truth, person_id, f"baseline:{state.time}")
             time_window = fuzz_time(kill_event.timestamp, sigma=1.5, rng=rng)
-            statement = f"I heard a disturbance near the {location_name}."
+            statement = f"I heard a disturbance near {place}."
             if truth_seen and suspect_name:
-                statement = f"I saw {suspect_name} outside the {location_name}."
+                statement = f"I saw {suspect_name} outside {place}."
             hooks = baseline_hooks(interview_state.baseline_profile, statement, [])
             evidence = WitnessStatement(
                 evidence_type=EvidenceType.TESTIMONIAL,
@@ -450,9 +452,9 @@ def interview(
         if lie_bias and lie_type == "denial":
             statement = f"I didn't see anyone, just noise around {time_phrase}."
         else:
-            statement = f"I saw {suspect_name} near the {location_name} {time_phrase}."
+            statement = f"I saw {suspect_name} near {place} {time_phrase}."
         if not truth_seen and not observed_person_ids:
-            statement = f"I heard a disturbance near the {location_name} {time_phrase}."
+            statement = f"I heard a disturbance near {place} {time_phrase}."
 
         hooks = baseline_hooks(interview_state.baseline_profile, statement, template_hooks)
         evidence = WitnessStatement(

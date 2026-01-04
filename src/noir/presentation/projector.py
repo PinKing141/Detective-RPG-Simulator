@@ -14,6 +14,7 @@ from noir.presentation.evidence import (
 )
 from noir.presentation.erosion import confidence_from_window, fuzz_time, maybe_omit
 from noir.truth.graph import TruthState
+from noir.util.grammar import place_with_article
 from noir.util.rng import Rng
 from noir.locations.profiles import load_location_profiles
 
@@ -201,12 +202,13 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 observed_person_ids.append(offender.id)
             elif risk_tolerance >= 0.5 and rng.random() > 0.2 and presence >= 0.25:
                 observed_person_ids.append(offender.id)
-        location_name = location.name if location else "the building"
+        location_name = location.name if location else "building"
+        place = place_with_article(location_name)
         heard_prefix = "I think I heard" if confidence == ConfidenceBand.WEAK else "I heard"
         saw_prefix = "I think I saw" if confidence == ConfidenceBand.WEAK else "I saw"
-        statement = f"{heard_prefix} a struggle near the {location_name}."
+        statement = f"{heard_prefix} a struggle near {place}."
         if offender and observed_person_ids:
-            statement = f"{saw_prefix} {offender.name} outside the {location_name}."
+            statement = f"{saw_prefix} {offender.name} outside {place}."
         evidence.append(
             WitnessStatement(
                 evidence_type=EvidenceType.TESTIMONIAL,

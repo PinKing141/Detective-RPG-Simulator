@@ -8,6 +8,7 @@ from noir.domain.enums import EvidenceType
 from noir.investigation.costs import PRESSURE_LIMIT, TIME_LIMIT
 from noir.investigation.results import InvestigationState
 from noir.presentation.evidence import CCTVReport, ForensicsResult, WitnessStatement
+from noir.util.grammar import normalize_line
 
 
 @dataclass(frozen=True)
@@ -179,13 +180,13 @@ def format_profiling_summary(
         lines.append("Profiling summary")
         lines.append("")
     for line in summary.working_frame:
-        lines.append(line)
+        lines.append(normalize_line(line))
     lines.append("")
     lines.append("Focus shifts")
     for line in summary.focus_shifts:
-        lines.append(f"- {line}")
+        lines.append(f"- {normalize_line(line)}")
     lines.append("")
     lines.append("Risk notes")
     for line in summary.risk_notes:
-        lines.append(f"- {line}")
+        lines.append(f"- {normalize_line(line)}")
     return lines

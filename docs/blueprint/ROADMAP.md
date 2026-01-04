@@ -205,7 +205,7 @@ Scope
 - Rapport and resistance as costs and risks.
 - Lies are explicit and motive-driven, not random noise.
 - Statements become evidence with confidence bands.
-- Theme framing choices (minimization) allowed as a pressure tool.
+- Motive framing choices (minimization) allowed as a pressure tool.
 - Linguistic tell cues are template-based only (no NLP yet).
 - Interview state data model stored per NPC (phase, rapport, resistance, fatigue).
 - Evidence emissions produced through the existing action result pipeline.
@@ -238,6 +238,15 @@ Scope
 - Pattern assessment labels (Confirmed/Suspected/Imitation/Rejected).
 - Motif library and typology gate rules applied at generation time.
 - Pattern updates rendered as case-file addenda (BAU tone).
+
+Governance rules (defensive)
+- Absence flags tracked (token/staging/message), never disproves.
+- Bundle integrity: 2 of 3 required; single motif never advances.
+- Drift is static and non-adaptive (degraded/incomplete motifs allowed).
+- Spacing rule: signature-like motifs separated by 2 to 4 cases.
+- Escalation ladder only (Noted Similarity -> Consistent With Prior Incidents).
+- False positives must map to a clear source (ritual, victim, media, environmental).
+- Case-file addendum template is mandatory for pattern updates.
 
 Stop condition: If players can say "same offender" without certainty, stop.
 
@@ -274,6 +283,13 @@ Phase placement:
 - Phase 3: recurring offender without adaptation (pattern recognition only).
 - Phase 4: promote one offender to Nemesis; enable adaptation and endgame ops.
 - Phase 5+: Nemesis can be resolved and replaced.
+
+## Pacing guardrails (season rhythm)
+- Episode mix target: 60–70% standalone, 15–25% pressure/character, 10–15% nemesis-adjacent.
+- Background serial offenders: 0–1 active typically; never more than 2 at once.
+- Nemesis episodes are rare and loud; avoid back-to-back appearances.
+- Case length target: 6–10 meaningful actions.
+- Season length target: 12–16 episodes; allow early endings when trust/pressure collapse.
 
 ## Phase 4 - Campaign and Endings
 Phase question: Do conclusions feel earned, varied, and behavior-reflective?
@@ -331,6 +347,12 @@ Phase 4 systems (what to build)
    - Use 4 families (person, property, financial, organized).
    - Reuse at least 70 percent of evidence, actions, and validation.
    - Only generator/projector templates change. No new evidence classes.
+
+Phase 4 fairness rules (anti-cheat)
+- Capture requires both pattern confidence and operational readiness; no hidden thresholds.
+- Misses are explained in-world and tied to player choices (warrant denial, raid burn).
+- Every miss yields concrete progression (new constraint, motif detail, narrowed zone).
+- Same inputs must produce the same outcomes (determinism over drama).
 
 Phase 4 ordered task list
 1. CampaignState model (season progress, pressure/trust, nemesis flags).
