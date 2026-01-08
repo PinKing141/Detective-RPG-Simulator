@@ -11,6 +11,7 @@ from noir.investigation.interviews import InterviewState
 from noir.presentation.evidence import EvidenceItem
 from noir.presentation.knowledge import KnowledgeState
 from noir.locations.profiles import ScenePOI
+from noir.profiling.profile import OffenderProfile
 
 
 class ActionOutcome(StrEnum):
@@ -33,6 +34,8 @@ class InvestigationState:
     body_poi_id: str | None = None
     interviews: dict[str, InterviewState] = field(default_factory=dict)
     neighbor_leads: list["NeighborLead"] = field(default_factory=list)
+    profile: OffenderProfile | None = None
+    analyst_notes: list[str] = field(default_factory=list)
 
 
 if TYPE_CHECKING:

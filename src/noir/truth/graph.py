@@ -36,6 +36,40 @@ class TruthState:
         self.items[item.id] = item
         self.graph.add_node(item.id, node_type="item", name=item.name)
 
+    def add_relationship(
+        self,
+        person_id: UUID,
+        other_person_id: UUID,
+        relationship_type: str,
+        closeness: str,
+    ) -> None:
+        rules.ensure_entity_exists(person_id, self.people, "person")
+        rules.ensure_entity_exists(other_person_id, self.people, "person")
+        self.graph.add_edge(
+            person_id,
+            other_person_id,
+            edge_type="relationship",
+            relationship_type=relationship_type,
+            closeness=closeness,
+        )
+        self.graph.add_edge(
+            other_person_id,
+            person_id,
+            edge_type="relationship",
+            relationship_type=relationship_type,
+            closeness=closeness,
+        )
+
+    def relationship_between(
+        self, person_id: UUID, other_person_id: UUID
+    ) -> Dict[str, str] | None:
+        for _, target_id, data in self.graph.edges(person_id, data=True):
+            if target_id != other_person_id:
+                continue
+            if data.get("edge_type") == "relationship":
+                return dict(data)
+        return None
+
     def record_event(
         self,
         kind: EventKind,

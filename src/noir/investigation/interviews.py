@@ -47,6 +47,7 @@ class InterviewState:
     last_claims: list[str] = field(default_factory=list)
     motive_to_lie: bool = False
     contradiction_emitted: bool = False
+    dialog_node_id: str | None = None
 
 
 @dataclass(frozen=True)

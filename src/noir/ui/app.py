@@ -18,13 +18,18 @@ from noir.deduction.validation import validate_hypothesis
 from noir.domain.enums import RoleTag
 from noir.investigation.actions import (
     arrest,
+    follow_neighbor_lead,
     interview,
+    rossmo_lite,
     request_cctv,
+    set_profile,
     set_hypothesis,
     submit_forensics,
+    tech_sweep,
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
+from noir.investigation.dialog_graph import load_default_interview_graph
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
 from noir.investigation.leads import (
     LeadStatus,
@@ -50,6 +55,7 @@ from noir.narrative.recaps import (
     build_partner_line,
     build_previously_on,
 )
+from noir.narrative.debriefs import build_post_arrest_statement
 from noir.nemesis import PatternTracker
 from noir.presentation.evidence import (
     CCTVReport,
@@ -58,6 +64,12 @@ from noir.presentation.evidence import (
     WitnessStatement,
 )
 from noir.presentation.projector import project_case
+from noir.profiling.profile import (
+    ProfileDrive,
+    ProfileMobility,
+    ProfileOrganization,
+    format_profile_lines,
+)
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
 from noir.util.grammar import normalize_line
@@ -236,6 +248,8 @@ class Phase05App(App):
         self._suppress_list_events = False
         self.pattern_tracker = PatternTracker.from_library(self.base_rng.fork("pattern"))
         self.last_pattern_addendum = None
+        self.last_post_arrest_statement: list[str] = []
+        self.last_post_arrest_case_id: str | None = None
 
         self._start_case(self.case_index, case_id_override=self.case_id)
 
@@ -260,7 +274,7 @@ class Phase05App(App):
                     yield VerticalScroll(Static("", id="detail_view", expand=True), id="detail")
                 yield RichLog(id="wire", wrap=True)
                 yield ListView(id="actions")
-                yield Input(placeholder="Enter command (1-7 or q)...", id="command")
+                yield Input(placeholder="Enter command (1-11 or q)...", id="command")
 
     def on_mount(self) -> None:
         self._has_mounted = True
@@ -589,11 +603,7 @@ class Phase05App(App):
             else:
                 lines.append("No scene area selected.")
         elif self.active_tab == "profile":
-            lines.append("Profiling summary")
-            if self.profile_lines:
-                lines.extend(self.profile_lines)
-            else:
-                lines.append("(none)")
+            lines.extend(self._build_profile_tab_lines())
         elif self.active_tab == "pattern":
             lines.append("Pattern addendum")
             if payload and payload.get("type") == "pattern":
@@ -638,6 +648,12 @@ class Phase05App(App):
                     lines.extend(context_lines)
                 else:
                     lines.append("(no world notes)")
+            elif payload and payload.get("key") == "post_arrest":
+                if self.last_post_arrest_statement:
+                    lines.append(f"Post-arrest statement ({self.last_post_arrest_case_id})")
+                    lines.extend(self.last_post_arrest_statement)
+                else:
+                    lines.append("(none)")
             else:
                 lines.append("(select a summary item)")
         detail.update("\n".join(lines))
@@ -695,15 +711,15 @@ class Phase05App(App):
                     }
                 )
         elif self.active_tab == "profile":
-            if self.profile_lines:
-                for idx, line in enumerate(self.profile_lines):
-                    payloads.append(
-                        {
-                            "type": "profile",
-                            "index": idx,
-                            "label": line,
-                        }
-                    )
+            profile_lines = self._build_profile_tab_lines()
+            for idx, line in enumerate(profile_lines):
+                payloads.append(
+                    {
+                        "type": "profile",
+                        "index": idx,
+                        "label": line,
+                    }
+                )
         elif self.active_tab == "pattern":
             if self.last_pattern_addendum:
                 payloads = [
@@ -722,6 +738,14 @@ class Phase05App(App):
                 {"type": "summary", "key": "pattern", "label": "Pattern addendum"},
                 {"type": "summary", "key": "world", "label": "World context"},
             ]
+            if self.last_post_arrest_statement:
+                payloads.append(
+                    {
+                        "type": "summary",
+                        "key": "post_arrest",
+                        "label": "Post-arrest statement",
+                    }
+                )
 
         if not payloads:
             payloads = [{"type": "empty", "label": "(none)"}]
@@ -746,6 +770,7 @@ class Phase05App(App):
         )
         has_evidence = bool(self.state.knowledge.known_evidence)
         has_hypothesis = self.board.hypothesis is not None
+        has_neighbor = bool(self.state.neighbor_leads)
         return [
             {"cmd": "1", "label": "Visit scene", "enabled": True},
             {"cmd": "2", "label": "Interview witness", "enabled": has_witness},
@@ -754,6 +779,10 @@ class Phase05App(App):
             {"cmd": "5", "label": "Set hypothesis", "enabled": has_evidence},
             {"cmd": "6", "label": "Profiling summary", "enabled": True},
             {"cmd": "7", "label": "Arrest suspect", "enabled": has_hypothesis},
+            {"cmd": "8", "label": "Follow neighbor lead", "enabled": has_neighbor},
+            {"cmd": "9", "label": "Set profile", "enabled": has_evidence},
+            {"cmd": "10", "label": "Analyst: Rossmo-lite", "enabled": True},
+            {"cmd": "11", "label": "Analyst: Tech sweep", "enabled": True},
         ]
 
     def _refresh_actions(self) -> None:
@@ -869,6 +898,33 @@ class Phase05App(App):
             InterviewTheme.ACCIDENTAL: "Accidental outcome",
         }
         return mapping.get(theme, theme.value)
+
+    def _profile_org_label(self, organization: ProfileOrganization) -> str:
+        mapping = {
+            ProfileOrganization.ORGANIZED: "Organized",
+            ProfileOrganization.DISORGANIZED: "Disorganized",
+            ProfileOrganization.MIXED: "Mixed",
+            ProfileOrganization.UNKNOWN: "Unknown",
+        }
+        return mapping.get(organization, organization.value)
+
+    def _profile_drive_label(self, drive: ProfileDrive) -> str:
+        mapping = {
+            ProfileDrive.VISIONARY: "Visionary",
+            ProfileDrive.MISSION: "Mission-oriented",
+            ProfileDrive.HEDONISTIC: "Hedonistic",
+            ProfileDrive.POWER_CONTROL: "Power/Control",
+            ProfileDrive.UNKNOWN: "Unknown",
+        }
+        return mapping.get(drive, drive.value)
+
+    def _profile_mobility_label(self, mobility: ProfileMobility) -> str:
+        mapping = {
+            ProfileMobility.MARAUDER: "Marauder (local)",
+            ProfileMobility.COMMUTER: "Commuter",
+            ProfileMobility.UNKNOWN: "Unknown",
+        }
+        return mapping.get(mobility, mobility.value)
 
     def _format_hour(self, hour: int) -> str:
         value = hour % 24
@@ -1044,6 +1100,23 @@ class Phase05App(App):
             f"Gaps: {gap_summary}",
         ]
 
+    def _build_profile_tab_lines(self) -> list[str]:
+        lines = ["Working profile"]
+        lines.extend(format_profile_lines(self.state.profile, self.presentation.evidence))
+        lines.append("")
+        lines.append("Profiling summary")
+        if self.profile_lines:
+            lines.extend(self.profile_lines)
+        else:
+            lines.append("(none)")
+        lines.append("")
+        lines.append("Analyst notes")
+        if self.state.analyst_notes:
+            lines.extend(self.state.analyst_notes)
+        else:
+            lines.append("(none)")
+        return lines
+
     def _handle_command(self, value: str) -> None:
         if value == "1":
             body_poi = None
@@ -1143,13 +1216,69 @@ class Phase05App(App):
             if result.action == ActionType.ARREST:
                 self._finalize_arrest()
             return
+        if value == "8":
+            if not self.state.neighbor_leads:
+                self._write("No neighbor leads available.")
+                return
+            if len(self.state.neighbor_leads) == 1:
+                lead = self.state.neighbor_leads[0]
+                result = follow_neighbor_lead(
+                    self.truth,
+                    self.presentation,
+                    self.state,
+                    self.location_id,
+                    lead,
+                )
+                self._apply_action_result(result)
+                return
+            self.prompt_state = PromptState(
+                step="neighbor_lead", options=list(self.state.neighbor_leads)
+            )
+            lines = ["Choose a neighbor lead:"]
+            for idx, lead in enumerate(self.prompt_state.options, start=1):
+                lines.append(f"{idx}) {format_neighbor_lead(lead)}")
+            self._set_prompt("Neighbor lead", lines)
+            self._set_prompt_active(True)
+            return
+        if value == "9":
+            self._start_profile_prompt()
+            return
+        if value == "10":
+            mobility = (
+                self.state.profile.mobility
+                if self.state.profile is not None
+                else ProfileMobility.UNKNOWN
+            )
+            if mobility == ProfileMobility.UNKNOWN:
+                self.prompt_state = PromptState(
+                    step="rossmo_assumption",
+                    options=list(ProfileMobility),
+                )
+                lines = ["Assume mobility model:"]
+                for idx, option in enumerate(self.prompt_state.options, start=1):
+                    lines.append(f"{idx}) {self._profile_mobility_label(option)}")
+                self._set_prompt("Rossmo-lite assumption", lines)
+                self._set_prompt_active(True)
+                return
+            result = rossmo_lite(self.truth, self.state, mobility)
+            self._apply_action_result(result)
+            return
+        if value == "11":
+            result = tech_sweep(
+                self.truth,
+                self.presentation,
+                self.state,
+                self.location_id,
+            )
+            self._apply_action_result(result)
+            return
         self._write("Unknown action.")
 
     def _apply_action_result(self, result) -> None:
         autonomy_notes = apply_autonomy(self.state, self.world, self.district)
         if autonomy_notes:
             result.notes.extend(autonomy_notes)
-        if result.action == ActionType.SET_HYPOTHESIS and result.outcome == ActionOutcome.SUCCESS:
+        if result.action in {ActionType.SET_HYPOTHESIS, ActionType.SET_PROFILE} and result.outcome == ActionOutcome.SUCCESS:
             self._write(
                 f"{result.summary} (+{result.time_cost} time, +{result.pressure_cost} pressure)"
             )
@@ -1187,6 +1316,13 @@ class Phase05App(App):
         self._write(f"Case outcome: {outcome.arrest_result}.")
         for note in outcome.notes:
             self._write(f"- {note}")
+        debrief_rng = self.base_rng.fork(f"debrief-{self.case_index}")
+        debrief_lines = build_post_arrest_statement(
+            debrief_rng, self.truth, self.board, validation, outcome.arrest_result
+        )
+        debrief_notes = []
+        if debrief_lines:
+            debrief_notes = [f"Post-arrest: {debrief_lines[0]}"]
         case_end_tick = self.case_start_tick + self.state.time
         world_notes = self.world.apply_case_outcome(
             outcome,
@@ -1196,6 +1332,7 @@ class Phase05App(App):
             self.location_name,
             self.case_start_tick,
             case_end_tick,
+            extra_notes=debrief_notes,
         )
         if self.world_store:
             self.world_store.save_world_state(self.world)
@@ -1205,6 +1342,10 @@ class Phase05App(App):
         end_rng = self.base_rng.fork(f"end-{self.case_index}")
         for line in build_end_tag(end_rng, outcome.arrest_result.value):
             self._write(line)
+        self.last_post_arrest_statement = debrief_lines
+        self.last_post_arrest_case_id = self.truth.case_id
+        if self.last_post_arrest_statement:
+            self._write("Post-arrest statement filed.")
         pattern_addendum = self.pattern_tracker.record_case(
             self.truth.case_id, self.case_index
         )
@@ -1229,6 +1370,8 @@ class Phase05App(App):
             world=self.world,
             case_archetype=self.case_archetype,
         )
+        pattern_plan = self.pattern_tracker.plan_case(case_id, case_index)
+        self.truth.case_meta["pattern_plan"] = pattern_plan.to_case_meta()
         self.presentation = project_case(self.truth, case_rng.fork("projection"))
         self.case_start_tick = self.world.tick
         location = self.truth.locations.get(self.case_facts["crime_scene_id"])
@@ -1348,6 +1491,38 @@ class Phase05App(App):
         self._set_prompt_active(True)
         return None
 
+    def _set_interview_dialog_prompt(
+        self,
+        witness_id,
+        approach: InterviewApproach,
+        theme: InterviewTheme | None,
+    ) -> bool:
+        graph = load_default_interview_graph()
+        if graph is None:
+            return False
+        interview_state = self.state.interviews.get(str(witness_id)) if self.state else None
+        node_id = graph.root_node_id
+        if interview_state and interview_state.dialog_node_id:
+            node_id = interview_state.dialog_node_id
+        if not graph.has_node(node_id):
+            node_id = graph.root_node_id
+        node = graph.node(node_id)
+        if not node.choices:
+            node = graph.node(graph.root_node_id)
+        if not node.choices:
+            return False
+        self.prompt_state = PromptState(
+            step="interview_dialog",
+            data={"witness_id": witness_id, "approach": approach, "theme": theme},
+            options=list(node.choices),
+        )
+        lines = ["Choose a prompt:"]
+        for idx, choice in enumerate(self.prompt_state.options, start=1):
+            lines.append(f"{idx}) {choice.text}")
+        self._set_prompt("Interview prompt", lines)
+        self._set_prompt_active(True)
+        return True
+
     def _start_hypothesis_prompt(self) -> None:
         self.board.sync_from_state(self.state)
         suspects = [p for p in self.truth.people.values() if RoleTag.OFFENDER in p.role_tags]
@@ -1359,6 +1534,15 @@ class Phase05App(App):
         for idx, person in enumerate(suspects, start=1):
             lines.append(f"{idx}) {person.name}")
         self._set_prompt("Hypothesis suspect", lines)
+        self._set_prompt_active(True)
+
+    def _start_profile_prompt(self) -> None:
+        options = list(ProfileOrganization)
+        self.prompt_state = PromptState(step="profile_org", options=options)
+        lines = ["Choose organization style:"]
+        for idx, org in enumerate(options, start=1):
+            lines.append(f"{idx}) {self._profile_org_label(org)}")
+        self._set_prompt("Working profile", lines)
         self._set_prompt_active(True)
 
     def _handle_prompt_input(self, value: str) -> None:
@@ -1402,6 +1586,8 @@ class Phase05App(App):
                 self._set_prompt("Motive framing", lines)
                 return
             witness_id = self.prompt_state.data["witness_id"]
+            if self._set_interview_dialog_prompt(witness_id, approach, None):
+                return
             self.prompt_state = None
             self._set_prompt_active(False)
             result = interview(
@@ -1422,6 +1608,8 @@ class Phase05App(App):
             theme = self.prompt_state.options[selection]
             witness_id = self.prompt_state.data["witness_id"]
             approach = self.prompt_state.data.get("approach", InterviewApproach.THEME)
+            if self._set_interview_dialog_prompt(witness_id, approach, theme):
+                return
             self.prompt_state = None
             self._set_prompt_active(False)
             result = interview(
@@ -1432,6 +1620,45 @@ class Phase05App(App):
                 self.location_id,
                 approach=approach,
                 theme=theme,
+            )
+            self._apply_action_result(result)
+            return
+        if step == "interview_dialog":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            witness_id = self.prompt_state.data["witness_id"]
+            approach = self.prompt_state.data.get("approach", InterviewApproach.BASELINE)
+            theme = self.prompt_state.data.get("theme")
+            self.prompt_state = None
+            self._set_prompt_active(False)
+            result = interview(
+                self.truth,
+                self.presentation,
+                self.state,
+                witness_id,
+                self.location_id,
+                approach=approach,
+                theme=theme,
+                dialog_choice_index=selection,
+            )
+            self._apply_action_result(result)
+            return
+        if step == "neighbor_lead":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            lead = self.prompt_state.options[selection]
+            self.prompt_state = None
+            self._set_prompt_active(False)
+            result = follow_neighbor_lead(
+                self.truth,
+                self.presentation,
+                self.state,
+                self.location_id,
+                lead,
             )
             self._apply_action_result(result)
             return
@@ -1451,6 +1678,84 @@ class Phase05App(App):
                 poi_id=poi.poi_id,
                 poi_label=self._poi_display_label(poi),
                 poi_description=poi.description,
+            )
+            self._apply_action_result(result)
+            return
+        if step == "rossmo_assumption":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            assumption = self.prompt_state.options[selection]
+            self.prompt_state = None
+            self._set_prompt_active(False)
+            result = rossmo_lite(self.truth, self.state, assumption)
+            self._apply_action_result(result)
+            return
+        if step == "profile_org":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            self.prompt_state.data["organization"] = self.prompt_state.options[selection]
+            self.prompt_state.step = "profile_drive"
+            self.prompt_state.options = list(ProfileDrive)
+            lines = ["Choose primary drive:"]
+            for idx, drive in enumerate(self.prompt_state.options, start=1):
+                lines.append(f"{idx}) {self._profile_drive_label(drive)}")
+            self._set_prompt("Working profile", lines)
+            return
+        if step == "profile_drive":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            self.prompt_state.data["drive"] = self.prompt_state.options[selection]
+            self.prompt_state.step = "profile_mobility"
+            self.prompt_state.options = list(ProfileMobility)
+            lines = ["Choose mobility model:"]
+            for idx, mobility in enumerate(self.prompt_state.options, start=1):
+                lines.append(f"{idx}) {self._profile_mobility_label(mobility)}")
+            self._set_prompt("Working profile", lines)
+            return
+        if step == "profile_mobility":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            self.prompt_state.data["mobility"] = self.prompt_state.options[selection]
+            evidence_items = [
+                item
+                for item in self.presentation.evidence
+                if item.id in set(self.state.knowledge.known_evidence)
+            ]
+            self.prompt_state.step = "profile_evidence"
+            self.prompt_state.options = evidence_items
+            if not evidence_items:
+                self._write("No evidence collected yet.")
+                self.prompt_state = None
+                self._set_prompt_active(False)
+                return
+            lines = ["Choose 1 to 3 evidence items (comma-separated):"]
+            for idx, item in enumerate(evidence_items, start=1):
+                detail_lines = self._format_evidence_detail(idx, item)
+                lines.extend(detail_lines)
+                lines.append("")
+            if lines and lines[-1] == "":
+                lines.pop()
+            self._set_prompt("Profile evidence", lines)
+            return
+        if step == "profile_evidence":
+            evidence_ids = self._parse_indices(value, self.prompt_state.options)
+            data = self.prompt_state.data
+            self.prompt_state = None
+            self._set_prompt_active(False)
+            result = set_profile(
+                self.state,
+                data["organization"],
+                data["drive"],
+                data["mobility"],
+                evidence_ids,
             )
             self._apply_action_result(result)
             return

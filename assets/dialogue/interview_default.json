@@ -1,0 +1,40 @@
+{
+  "graph": {
+    "root": "START",
+    "nodes": [
+      {
+        "id": "START",
+        "text": "",
+        "choices": [
+          {
+            "text": "Ask who was around",
+            "leads_to": "PRESENCE",
+            "tags": ["presence"]
+          },
+          {
+            "text": "Ask about the time window",
+            "leads_to": "TIMING",
+            "tags": ["opportunity", "timeline"]
+          },
+          {
+            "text": "Ask about prior contact",
+            "leads_to": "RELATION",
+            "tags": ["relationship"]
+          }
+        ]
+      },
+      {
+        "id": "PRESENCE",
+        "text": "I saw {suspect} near {place} {time_phrase}."
+      },
+      {
+        "id": "TIMING",
+        "text": "It was {time_phrase} when I heard something outside {place}."
+      },
+      {
+        "id": "RELATION",
+        "text": "I have seen {suspect} around {place} before, but I did not speak to them."
+      }
+    ]
+  }
+}

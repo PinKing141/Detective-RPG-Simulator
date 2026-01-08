@@ -206,6 +206,7 @@ Scope
 - Lies are explicit and motive-driven, not random noise.
 - Statements become evidence with confidence bands.
 - Motive framing choices (minimization) allowed as a pressure tool.
+- Post-arrest statement vignette (optional, skippable; roleplay only).
 - Linguistic tell cues are template-based only (no NLP yet).
 - Interview state data model stored per NPC (phase, rapport, resistance, fatigue).
 - Evidence emissions produced through the existing action result pipeline.
@@ -223,6 +224,7 @@ Scope
 - No new truth facts and no validation impact.
 - Optional Tracery flavor lines for gaze overlays (presentation only).
 - Perception filters are phrasing-only (no stat thresholds yet).
+- Post-arrest debrief vignette (optional, presentation only).
 
 Stop condition: If the same case reads differently without changing evidence, stop.
 
@@ -264,6 +266,97 @@ Scope
 - MO vector (approach/control/method/cleanup/exit) with weights and competence.
 
 Stop condition: If the offender feels persistent without dominating the game, stop.
+
+## Phase 3F - Multi-site Cases (Location Visits)
+Phase question: Do multi-site cases create meaningful travel trade-offs without open-world sprawl?
+Full spec: docs/blueprint/PHASE_3F_TASKS.md
+
+Scope
+- 2 to 4 locations per case (primary plus related sites).
+- Locations unlock through leads and evidence, not by default.
+- Travel/visit action to move between known sites (time/pressure cost).
+- Each location uses the existing POI system and location profiles.
+- At least one key evidence item lives off the primary scene.
+
+Stop condition: If multi-site cases create trade-offs without sprawl, stop.
+
+## Phase 3G - Unsub Profile Board (Working Profile)
+Phase question: Can players build an Unsub profile without it becoming certainty?
+Full spec: docs/blueprint/PHASE_3G_TASKS.md
+
+Scope
+- Working profile board (organization, drive, mobility).
+- Profile requires evidence support and can be revised with cost.
+- Profile does not affect arrest validation.
+- Constraint language only (supports/relies on/lacks).
+
+Stop condition: If profiles guide thinking without becoming answers, stop.
+
+## Phase 3H - Analyst Tools (Rossmo-lite + Tech Sweep)
+Phase question: Can analyst tools guide strategy without acting as a solver?
+Full spec: docs/blueprint/PHASE_3H_TASKS.md
+
+Scope
+- Rossmo-lite constraint report (top zones/districts, no map UI).
+- Tech sweep action yields leads (CCTV/witness/device pointer).
+- No new evidence classes; outputs are constraint notes.
+
+Stop condition: If analyst tools guide without solving, stop.
+
+## Phase 3 Gap Checklist (Current Code Audit)
+Use this to track the remaining Phase 3A–3F implementation gaps in the codebase.
+Check a box only when the behavior exists in play, not just in docs.
+
+### Phase 3A - Investigative Depth (Scene/POIs)
+- [ ] Neighbor leads are actionable (a follow-up action exists and yields evidence or interviews).
+  - Current gap: neighbor leads are displayed but do not drive any action path.
+  - Code refs: src/noir/investigation/leads.py, src/noir/ui/app.py
+- [ ] POIs can yield non-forensic evidence when appropriate (testimonial/digital/other).
+  - Current gap: POI evidence is forensics-only; scene exploration never reveals non-forensic items.
+  - Code refs: src/noir/presentation/projector.py, src/noir/investigation/actions.py
+- [ ] More than one witness can exist per case based on location presence curves.
+  - Current gap: only one witness is generated; presence affects confidence only.
+  - Code refs: src/noir/presentation/projector.py, src/noir/cases/truth_generator.py
+
+### Phase 3B - Interview System (Stateful Interviews)
+- [ ] At least one contradiction path per seed is guaranteed (not just possible).
+  - Current gap: contradictions only force under pressure after a baseline; no per-seed guarantee.
+  - Code refs: src/noir/investigation/actions.py (force_contradiction)
+- [ ] Confession phase produces a distinct output format (not just confidence/notes).
+  - Current gap: InterviewPhase.CONFESSION only adjusts confidence and notes.
+  - Code refs: src/noir/investigation/actions.py, src/noir/investigation/interviews.py
+
+### Phase 3C - TV Framing (Presentation Only)
+- [ ] Post-arrest vignette can be recorded in world history if needed for recaps.
+  - Current gap: vignette is session-only in CLI/TUI and not stored for "Previously on".
+  - Code refs: src/noir/ui/app.py, scripts/run_game.py, src/noir/narrative/debriefs.py
+
+### Phase 3D - Pattern Tracker (Proto-Nemesis)
+- [ ] Pattern addendum is grounded in actual scene evidence (player can verify it).
+  - Current gap: addendum is meta-generated and does not reference case evidence.
+  - Code refs: src/noir/nemesis/patterns.py, src/noir/presentation/projector.py
+
+### Phase 3E - Persistent Offender (Light Nemesis Memory)
+- [ ] Persistent nemesis profile stored between cases (identity packet + MO vector).
+- [ ] Adaptation cooldown window enforced (avoid whack-a-mole MO).
+- [ ] Exposure meter tracked separately from department Pressure, with regression.
+- [ ] Escalation capped below Phase 4 visibility.
+  - Current gap: Phase 3E logic not implemented; only nemesis_activity exists.
+  - Code refs: src/noir/world/state.py, src/noir/nemesis/*
+
+### Phase 3F - Multi-site Cases (Location Visits)
+- [ ] Case location roster includes 2–4 locations with roles (primary/related/suspect/collateral).
+  - Current gap: generator only creates a single crime scene; no roster or roles.
+  - Code refs: src/noir/cases/truth_generator.py
+- [ ] Locations unlock through leads; a travel/visit action exists.
+  - Current gap: location_id is fixed and no travel action exists.
+  - Code refs: src/noir/ui/app.py, src/noir/investigation/actions.py
+- [ ] Active location gates POIs and local leads.
+  - Current gap: POIs and leads always reflect the primary scene.
+  - Code refs: src/noir/locations/profiles.py, src/noir/presentation/projector.py
+- [ ] At least one key evidence path is off-site.
+  - Current gap: evidence is generated at the crime scene only.
+  - Code refs: src/noir/presentation/projector.py, src/noir/cases/truth_generator.py
 
 ## Nemesis scope rules (global)
 Core principle:
@@ -398,7 +491,68 @@ Restraint proof
 
 Stop condition: When polish stops improving comprehension, stop entirely.
 
-Deferred beyond Phase 5 (optional experiments only)
-- spaCy/SCAN linguistic analysis.
+## Post-Phase 5 Expansion Track - BAU Systems (Criminal Minds)
+These phases are optional and only start after Phase 5 is locked. They add
+behavioral science systems without rewriting the core investigation loop.
+
+## Phase 6 - Unsub Behavioral Engine (Typologies + Victimology)
+Phase question: Can offender typologies drive case generation without breaking fairness?
+
+Scope
+- Offender profile model: anchor point, buffer zone, cooling-off, forensic awareness.
+- Four typology priors (Visionary, Mission, Hedonistic, Power/Control).
+- Typology-driven victimology biases and crime scene footprints.
+- Case generation uses offender routines instead of random selection.
+- No new evidence classes; reuse existing physical/temporal/testimonial.
+
+Stop condition: Players can infer typology after 2 to 3 cases, without certainty.
+
+## Phase 7 - Geographic Profiling (Tech Analyst)
+Phase question: Can spatial analysis guide leads without becoming a solver?
+
+Scope
+- Rossmo/Canter-inspired heatmap at district or zone level (no map UI required).
+- Marauder vs Commuter assumption as a player choice with consequences.
+- Tech Analyst action returns top zones, not a single answer.
+- Wrong assumptions waste time but remain legible.
+
+Stop condition: Heatmaps influence strategy but never confirm identity.
+
+## Phase 8 - Social Combat Interviews (Full Protocol)
+Phase question: Can interrogation become a tactical system without collapsing into a tree?
+
+Scope
+- Interview states: baseline, confrontation, theme, denial, confession, shutdown.
+- Composure, rapport, resistance as tactical resources.
+- Evidence acts as "ammo" for logic pressure.
+- Confession provides optional vignette text (skippable, roleplay only).
+- No NLP yet; use template-based tells.
+
+Stop condition: Interviews can succeed, fail, or shut down with legible causes.
+
+## Phase 9 - BAU Team Operations (Unit Roles)
+Phase question: Do specialist roles add depth without adding mini-games?
+
+Scope
+- Unit Chief + Tech Analyst + Academic + Field Agent roles.
+- Role actions wrap existing ops (stakeout, warrant, raid) and analysis tools.
+- Warrant gating for private data requests; public data is free.
+- No new core mechanics; roles only change access and cost.
+
+Stop condition: Roles create trade-offs without forcing a new UI layer.
+
+## Phase 10 - Network Crime Cases (Organized/Terror Cells)
+Phase question: Can network topology create new case shapes without new mechanics?
+
+Scope
+- NetworkX-based cell graphs for organized crime case types.
+- Centrality-based targets (hub, gatekeeper, ideologue, logistician).
+- Hydra effect (networks rewire after arrests).
+- Shares evidence classes and action set with homicide cases.
+
+Stop condition: Network cases feel distinct without adding new UI screens.
+
+Deferred beyond Phase 10 (optional experiments only)
+- spaCy/SCAN linguistic analysis and parsing.
 - Full forensic equations (algor/rigor/livor physics).
 - Full macro/meso/micro ZOI traversal.

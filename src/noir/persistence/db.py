@@ -13,6 +13,7 @@ from noir.world.state import (
     PersonRecord,
     WorldState,
 )
+from noir.nemesis.state import NemesisState
 
 
 class WorldStore:
@@ -34,6 +35,7 @@ class WorldStore:
             "district_status",
             "location_status",
             "people_index",
+            "nemesis_state",
         ):
             cur.execute(f"DELETE FROM {table}")
         self.conn.commit()
@@ -52,6 +54,14 @@ class WorldStore:
             tick=int(row["tick"]),
             nemesis_activity=int(row["nemesis_activity"]),
         )
+        cur.execute("SELECT state_json FROM nemesis_state WHERE id = 1")
+        row = cur.fetchone()
+        if row is not None and row["state_json"]:
+            try:
+                payload = json.loads(row["state_json"])
+                state.nemesis_state = NemesisState.from_dict(payload)
+            except json.JSONDecodeError:
+                state.nemesis_state = None
         cur.execute("SELECT used_ids, recent_registers, recent_tags FROM episode_title_state WHERE id = 1")
         row = cur.fetchone()
         if row is not None:
@@ -180,6 +190,13 @@ class WorldStore:
                 ),
             )
         self.conn.commit()
+        cur.execute("DELETE FROM nemesis_state")
+        if state.nemesis_state is not None:
+            cur.execute(
+                "INSERT INTO nemesis_state (id, state_json) VALUES (1, ?)",
+                (json.dumps(state.nemesis_state.to_dict()),),
+            )
+        self.conn.commit()
 
     def record_case(self, record: CaseRecord) -> None:
         notes = " | ".join(record.notes)
@@ -279,6 +296,14 @@ class WorldStore:
                 created_in_case_id TEXT NOT NULL,
                 last_seen_case_id TEXT NOT NULL,
                 last_seen_tick INTEGER NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nemesis_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                state_json TEXT
             )
             """
         )

@@ -68,6 +68,14 @@ Decision rule:
 - TOD bands expressed as windows (e.g., 4 to 7 hours).
 - At least two distinct POI paths per case.
 - LocationProfile scope sets are used to surface optional neighbor leads.
+## Current implementation gaps (code audit)
+Last updated: 2026-01-08
+- Neighbor leads are displayed but not actionable (no follow-up action).
+  - Code refs: src/noir/investigation/leads.py, src/noir/ui/app.py
+- POIs only yield forensics; no testimonial/digital evidence from scene POIs.
+  - Code refs: src/noir/presentation/projector.py, src/noir/investigation/actions.py
+- Only one witness per case; presence curves only affect confidence.
+  - Code refs: src/noir/presentation/projector.py, src/noir/cases/truth_generator.py
 
 ## Exit checklist
 - [ ] Each scene has 3 to 5 POIs with time/pressure costs.

@@ -120,6 +120,10 @@ Continue monitoring in future cases.
 - At least one false positive per 3 to 5 cases (on average).
 - Motif library maintained in docs/blueprint/NEMESIS_MOTIF_LIBRARY.md.
 - Generator-ready motifs in assets/text_atoms/nemesis_motifs.yml.
+## Current implementation gaps (code audit)
+Last updated: 2026-01-08
+- Pattern addendum is not grounded in actual scene evidence (meta-driven only).
+  - Code refs: src/noir/nemesis/patterns.py, src/noir/presentation/projector.py
 
 ## Exit checklist
 - [x] Players notice a recurring motif without certainty.

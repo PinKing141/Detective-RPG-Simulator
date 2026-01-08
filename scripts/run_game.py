@@ -17,13 +17,18 @@ from noir.deduction.validation import validate_hypothesis
 from noir.domain.enums import EvidenceType, RoleTag
 from noir.investigation.actions import (
     arrest,
+    follow_neighbor_lead,
     interview,
+    rossmo_lite,
     request_cctv,
+    set_profile,
     set_hypothesis,
     submit_forensics,
+    tech_sweep,
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
+from noir.investigation.dialog_graph import load_default_interview_graph
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
 from noir.investigation.leads import (
     LeadStatus,
@@ -49,6 +54,7 @@ from noir.narrative.recaps import (
     build_partner_line,
     build_previously_on,
 )
+from noir.narrative.debriefs import build_post_arrest_statement
 from noir.nemesis import PatternTracker
 from noir.presentation.evidence import (
     CCTVReport,
@@ -57,6 +63,12 @@ from noir.presentation.evidence import (
     WitnessStatement,
 )
 from noir.presentation.projector import project_case
+from noir.profiling.profile import (
+    ProfileDrive,
+    ProfileMobility,
+    ProfileOrganization,
+    format_profile_lines,
+)
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
 from noir.util.grammar import normalize_line
@@ -139,6 +151,66 @@ def _choose_interview_theme() -> InterviewTheme | None:
     return options[index]
 
 
+def _choose_profile_org() -> ProfileOrganization | None:
+    labels = {
+        ProfileOrganization.ORGANIZED: "Organized",
+        ProfileOrganization.DISORGANIZED: "Disorganized",
+        ProfileOrganization.MIXED: "Mixed",
+        ProfileOrganization.UNKNOWN: "Unknown",
+    }
+    print("Choose organization style:")
+    return _choose_enum(ProfileOrganization, lambda value: labels.get(value, value.value))
+
+
+def _choose_profile_drive() -> ProfileDrive | None:
+    labels = {
+        ProfileDrive.VISIONARY: "Visionary",
+        ProfileDrive.MISSION: "Mission-oriented",
+        ProfileDrive.HEDONISTIC: "Hedonistic",
+        ProfileDrive.POWER_CONTROL: "Power/Control",
+        ProfileDrive.UNKNOWN: "Unknown",
+    }
+    print("Choose primary drive:")
+    return _choose_enum(ProfileDrive, lambda value: labels.get(value, value.value))
+
+
+def _choose_profile_mobility() -> ProfileMobility | None:
+    labels = {
+        ProfileMobility.MARAUDER: "Marauder (local)",
+        ProfileMobility.COMMUTER: "Commuter",
+        ProfileMobility.UNKNOWN: "Unknown",
+    }
+    print("Choose mobility model:")
+    return _choose_enum(ProfileMobility, lambda value: labels.get(value, value.value))
+
+
+def _choose_dialog_choice(state: InvestigationState, witness_id) -> int | None:
+    graph = load_default_interview_graph()
+    if graph is None:
+        return None
+    interview_state = state.interviews.get(str(witness_id))
+    node_id = graph.root_node_id
+    if interview_state and interview_state.dialog_node_id:
+        node_id = interview_state.dialog_node_id
+    if not graph.has_node(node_id):
+        node_id = graph.root_node_id
+    node = graph.node(node_id)
+    if not node.choices:
+        node = graph.node(graph.root_node_id)
+    if not node.choices:
+        return None
+    print("Choose a prompt:")
+    for idx, choice in enumerate(node.choices, start=1):
+        print(f"{idx}) {choice.text}")
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        return None
+    index = int(choice) - 1
+    if index < 0 or index >= len(node.choices):
+        return None
+    return index
+
+
 def _observed_suspect_id(presentation, evidence_ids: list) -> object | None:
     id_set = set(evidence_ids)
     counts: dict[object, int] = {}
@@ -210,6 +282,21 @@ def _choose_poi(state: InvestigationState) -> ScenePOI | None:
     if index < 0 or index >= len(unvisited):
         return None
     return unvisited[index]
+
+
+def _choose_neighbor_lead(state: InvestigationState):
+    if not state.neighbor_leads:
+        return None
+    print("Choose a neighbor lead:")
+    for idx, lead in enumerate(state.neighbor_leads, start=1):
+        print(f"{idx}) {format_neighbor_lead(lead)}")
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        return None
+    index = int(choice) - 1
+    if index < 0 or index >= len(state.neighbor_leads):
+        return None
+    return state.neighbor_leads[index]
 
 def _primary_role_tag(role_tags: list[RoleTag]) -> str:
     if RoleTag.WITNESS in role_tags:
@@ -514,6 +601,7 @@ def _start_case(
     seed: int,
     case_index: int,
     world: WorldState,
+    pattern_tracker: PatternTracker | None = None,
     case_id_override: str | None = None,
     case_archetype: CaseArchetype | None = None,
 ):
@@ -522,6 +610,9 @@ def _start_case(
     truth, case_facts = generate_case(
         case_rng, case_id=case_id, world=world, case_archetype=case_archetype
     )
+    if pattern_tracker:
+        pattern_plan = pattern_tracker.plan_case(case_id, case_index)
+        truth.case_meta["pattern_plan"] = pattern_plan.to_case_meta()
     presentation = project_case(truth, case_rng.fork("projection"))
     location = truth.locations.get(case_facts["crime_scene_id"])
     district = location.district if location else "unknown"
@@ -740,6 +831,7 @@ def main() -> None:
         args.seed,
         case_index,
         world,
+        pattern_tracker=pattern_tracker,
         case_id_override=args.case_id,
         case_archetype=case_archetype,
     )
@@ -766,6 +858,12 @@ def main() -> None:
         )
         for line in _hypothesis_summary_lines(board, truth, presentation):
             print(line)
+        if state.profile is None:
+            print("Working profile: (none)")
+        else:
+            print("Working profile")
+            for line in format_profile_lines(state.profile, presentation.evidence):
+                print(f"- {line}")
         print(f"Evidence known: {len(state.knowledge.known_evidence)}/{len(presentation.evidence)}")
         lead_lines = _lead_lines(state)
         if lead_lines and lead_lines != ["(none)"]:
@@ -824,6 +922,13 @@ def main() -> None:
                 print(f"- {line}")
             if len(profile_lines) > 3:
                 print(f"- ... +{len(profile_lines) - 3} more")
+        if state.analyst_notes:
+            print("Analyst notes")
+            for line in state.analyst_notes[-4:]:
+                if line:
+                    print(f"- {normalize_line(line)}")
+            if len(state.analyst_notes) > 4:
+                print("- ...")
         print("1) Visit scene")
         print("2) Interview witness")
         print("3) Request CCTV")
@@ -831,6 +936,10 @@ def main() -> None:
         print("5) Set hypothesis")
         print("6) Profiling summary")
         print("7) Arrest suspect")
+        print("8) Follow neighbor lead")
+        print("9) Set profile")
+        print("10) Analyst: Rossmo-lite")
+        print("11) Analyst: Tech sweep")
         print("g) Toggle gaze")
         choice = input("> ").strip().lower()
         if choice == "q":
@@ -901,6 +1010,7 @@ def main() -> None:
                 if theme is None:
                     print("Invalid theme selection.")
                     continue
+            dialog_choice_index = _choose_dialog_choice(state, selection[1].id)
             result = interview(
                 truth,
                 presentation,
@@ -909,6 +1019,7 @@ def main() -> None:
                 location_id,
                 approach=approach,
                 theme=theme,
+                dialog_choice_index=dialog_choice_index,
             )
         elif choice == "3":
             result = request_cctv(truth, presentation, state, location_id)
@@ -958,6 +1069,55 @@ def main() -> None:
                 location_id,
                 has_hypothesis=True,
             )
+        elif choice == "8":
+            lead = _choose_neighbor_lead(state)
+            if lead is None:
+                print("No neighbor leads available.")
+                continue
+            result = follow_neighbor_lead(
+                truth,
+                presentation,
+                state,
+                location_id,
+                lead,
+            )
+        elif choice == "9":
+            organization = _choose_profile_org()
+            if organization is None:
+                print("Invalid profile selection.")
+                continue
+            drive = _choose_profile_drive()
+            if drive is None:
+                print("Invalid profile selection.")
+                continue
+            mobility = _choose_profile_mobility()
+            if mobility is None:
+                print("Invalid profile selection.")
+                continue
+            evidence_ids = _choose_evidence(
+                truth, presentation, state, list(state.knowledge.known_evidence), gaze_mode
+            )
+            result = set_profile(
+                state,
+                organization,
+                drive,
+                mobility,
+                evidence_ids,
+            )
+        elif choice == "10":
+            mobility = (
+                state.profile.mobility
+                if state.profile is not None
+                else ProfileMobility.UNKNOWN
+            )
+            if mobility == ProfileMobility.UNKNOWN:
+                mobility = _choose_profile_mobility()
+                if mobility is None:
+                    print("Invalid mobility selection.")
+                    continue
+            result = rossmo_lite(truth, state, mobility)
+        elif choice == "11":
+            result = tech_sweep(truth, presentation, state, location_id)
         else:
             print("Unknown action.")
             continue
@@ -966,7 +1126,7 @@ def main() -> None:
         if autonomy_notes:
             result.notes.extend(autonomy_notes)
 
-        if result.action == ActionType.SET_HYPOTHESIS and result.outcome == ActionOutcome.SUCCESS:
+        if result.action in {ActionType.SET_HYPOTHESIS, ActionType.SET_PROFILE} and result.outcome == ActionOutcome.SUCCESS:
             print(
                 f"{result.summary} (+{result.time_cost} time, +{result.pressure_cost} pressure)"
             )
@@ -1049,6 +1209,13 @@ def main() -> None:
             print(f"Case outcome: {outcome.arrest_result}.")
             for note in outcome.notes:
                 print(f"- {note}")
+            debrief_rng = base_rng.fork(f"debrief-{case_index}")
+            statement_lines = build_post_arrest_statement(
+                debrief_rng, truth, board, validation, outcome.arrest_result
+            )
+            debrief_notes = []
+            if statement_lines:
+                debrief_notes = [f"Post-arrest: {statement_lines[0]}"]
             case_end_tick = case_start_tick + state.time
             world_notes = world.apply_case_outcome(
                 outcome,
@@ -1058,6 +1225,7 @@ def main() -> None:
                 location_name,
                 case_start_tick,
                 case_end_tick,
+                extra_notes=debrief_notes,
             )
             if world_store:
                 world_store.save_world_state(world)
@@ -1067,6 +1235,12 @@ def main() -> None:
             end_rng = base_rng.fork(f"end-{case_index}")
             for line in build_end_tag(end_rng, outcome.arrest_result.value):
                 print(line)
+            if statement_lines:
+                choice = input("View post-arrest statement? (y/N): ").strip().lower()
+                if choice in {"y", "yes"}:
+                    print("")
+                    for line in statement_lines:
+                        print(line)
             pattern_addendum = pattern_tracker.record_case(truth.case_id, case_index)
             if pattern_addendum:
                 print("")
@@ -1079,6 +1253,7 @@ def main() -> None:
                 args.seed,
                 case_index,
                 world,
+                pattern_tracker=pattern_tracker,
                 case_archetype=case_archetype,
             )
             selected_evidence_id = None

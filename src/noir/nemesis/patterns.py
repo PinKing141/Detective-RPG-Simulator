@@ -104,6 +104,59 @@ class PatternAddendum:
         return lines
 
 
+def _motif_meta(motif: Motif | None) -> dict[str, Any] | None:
+    if motif is None:
+        return None
+    return {
+        "id": motif.id,
+        "name": motif.name,
+        "category": motif.category,
+        "token": motif.token,
+        "staging": motif.staging,
+        "trace": motif.trace,
+        "style": motif.style,
+        "message": motif.message,
+        "discoverability": list(motif.discoverability),
+        "copycat_risk": motif.copycat_risk,
+    }
+
+
+def _observation_meta(observation: MotifObservation | None) -> dict[str, str] | None:
+    if observation is None:
+        return None
+    return {
+        "token_status": observation.token_status,
+        "staging_status": observation.staging_status,
+        "message_status": observation.message_status,
+    }
+
+
+@dataclass(frozen=True)
+class PatternCasePlan:
+    case_id: str
+    case_index: int
+    pattern_type: PatternType
+    label: str | None
+    primary: Motif | None
+    support: Motif | None
+    observation: MotifObservation | None
+    support_present: bool
+    red_herring_source: str | None = None
+
+    def to_case_meta(self) -> dict[str, Any]:
+        return {
+            "case_id": self.case_id,
+            "case_index": self.case_index,
+            "pattern_type": self.pattern_type.value,
+            "label": self.label,
+            "primary": _motif_meta(self.primary),
+            "support": _motif_meta(self.support),
+            "observation": _observation_meta(self.observation),
+            "support_present": self.support_present,
+            "red_herring_source": self.red_herring_source,
+        }
+
+
 def _motifs_path() -> Path:
     root = Path(__file__).resolve().parents[3]
     return root / "assets" / "text_atoms" / "nemesis_motifs.yml"
@@ -159,17 +212,32 @@ class PatternTracker:
         self.false_positive_gap = rng.randint(3, 5)
         self.cases_since_false_positive = 0
         self.force_false_positive_next = False
+        self._case_plans: dict[str, PatternCasePlan] = {}
 
     @classmethod
     def from_library(cls, rng: Rng, path: Path | None = None) -> "PatternTracker":
         return cls(rng, _load_motifs(path))
 
-    def record_case(self, case_id: str, case_index: int) -> PatternAddendum | None:
+    def plan_case(self, case_id: str, case_index: int) -> PatternCasePlan:
+        existing = self._case_plans.get(case_id)
+        if existing:
+            return existing
         case_rng = self._rng.fork(f"case-{case_index}")
         pattern_type = self._decide_pattern_type(case_index, case_rng)
         if pattern_type == PatternType.NONE:
             self.cases_since_false_positive += 1
-            return None
+            plan = PatternCasePlan(
+                case_id=case_id,
+                case_index=case_index,
+                pattern_type=pattern_type,
+                label=None,
+                primary=None,
+                support=None,
+                observation=None,
+                support_present=False,
+            )
+            self._case_plans[case_id] = plan
+            return plan
         if pattern_type in (PatternType.COPYCAT, PatternType.RED_HERRING):
             self.cases_since_false_positive = 0
         else:
@@ -179,66 +247,84 @@ class PatternTracker:
             motif = self.signature_primary
             support = self.signature_support
             observation = self._build_observation(case_rng, motif, drift=True)
-            support_line = self._support_line(support, present=True)
             label = self._label_for_signature(observation, support_present=True)
+            support_present = True
+            red_herring_source = None
             self.signature_seen += 1
             self.last_signature_case = case_index
             self.next_signature_case = case_index + case_rng.randint(2, 4)
-            observations = [
-                self._motif_line(motif, observation),
-                support_line,
-                *self._status_lines(observation),
-            ]
         elif pattern_type == PatternType.COPYCAT:
             motif = self.signature_primary
+            support = self.signature_support
             observation = self._build_observation(case_rng, motif, drift=False, copycat=True)
-            support_line = self._support_line(self.signature_support, present=False)
             label = self._label_for_copycat(observation)
-            observations = [
-                self._motif_line(motif, observation),
-                support_line,
-                *self._status_lines(observation),
-            ]
+            support_present = False
+            red_herring_source = None
         elif pattern_type == PatternType.BACKGROUND:
             motif = self._background_motif(case_rng)
+            support = None
             observation = self._build_observation(case_rng, motif, drift=True)
             label = self._label_for_background(observation)
-            observations = [
-                self._motif_line(motif, observation),
-                *self._status_lines(observation),
-            ]
+            support_present = False
+            red_herring_source = None
             self.background_remaining = max(0, self.background_remaining - 1)
             if self.background_remaining == 0:
                 self.background_motif = None
         else:
             motif = self._red_herring_motif(case_rng)
+            support = None
             observation = self._build_observation(case_rng, motif, drift=False, red_herring=True)
             label = _LABEL_LADDER[0]
-            observations = [
-                self._motif_line(motif, observation),
-                *self._status_lines(observation),
-            ]
+            support_present = False
+            red_herring_source = case_rng.choice(_RED_HERRING_SOURCES)
+
+        plan = PatternCasePlan(
+            case_id=case_id,
+            case_index=case_index,
+            pattern_type=pattern_type,
+            label=label,
+            primary=motif,
+            support=support,
+            observation=observation,
+            support_present=support_present,
+            red_herring_source=red_herring_source,
+        )
+        self._case_plans[case_id] = plan
+        return plan
+
+    def record_case(self, case_id: str, case_index: int) -> PatternAddendum | None:
+        plan = self._case_plans.get(case_id)
+        if plan is None:
+            plan = self.plan_case(case_id, case_index)
+        if plan.pattern_type == PatternType.NONE or plan.primary is None or plan.observation is None:
+            return None
+        motif = plan.primary
+        observation = plan.observation
+        support = plan.support
+        observations: list[str] = [self._motif_line(motif, observation)]
+        if support:
+            observations.append(self._support_line(support, present=plan.support_present))
+        observations.extend(self._status_lines(observation))
 
         assessment_lines = [
             "This may indicate recurrence, imitation, or coincidence.",
             "Insufficient evidence to draw conclusions.",
         ]
-        if pattern_type == PatternType.COPYCAT:
+        if plan.pattern_type == PatternType.COPYCAT:
             assessment_lines.append("The placement could reflect imitation rather than continuity.")
-        if pattern_type == PatternType.RED_HERRING:
-            assessment_lines.append(case_rng.choice(_RED_HERRING_SOURCES))
-        if pattern_type == PatternType.BACKGROUND:
+        if plan.pattern_type == PatternType.RED_HERRING and plan.red_herring_source:
+            assessment_lines.append(plan.red_herring_source)
+        if plan.pattern_type == PatternType.BACKGROUND:
             assessment_lines.append("Treat this as a separate line until corroborated.")
 
         action_lines = ["Continue monitoring in future cases."]
-        addendum = PatternAddendum(
+        return PatternAddendum(
             case_id=case_id,
-            label=label,
+            label=plan.label or _LABEL_LADDER[0],
             observations=observations,
             assessment_lines=assessment_lines,
             action_lines=action_lines,
         )
-        return addendum
 
     def _decide_pattern_type(self, case_index: int, rng: Rng) -> PatternType:
         if self.force_false_positive_next and case_index != self.next_signature_case:

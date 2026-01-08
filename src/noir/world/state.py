@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from noir.investigation.costs import PRESSURE_LIMIT, clamp
+from noir.nemesis.state import NemesisState
 from noir.investigation.outcomes import ArrestResult, CaseOutcome, TRUST_LIMIT
 from noir.util.rng import Rng
 
@@ -62,6 +63,7 @@ class WorldState:
     trust: int = 3
     pressure: int = 0
     nemesis_activity: int = 0
+    nemesis_state: NemesisState | None = None
     tick: int = 0
     district_status: dict[str, DistrictStatus] = field(default_factory=dict)
     location_status: dict[str, DistrictStatus] = field(default_factory=dict)
@@ -85,6 +87,7 @@ class WorldState:
         location_name: str,
         started_tick: int,
         ended_tick: int,
+        extra_notes: list[str] | None = None,
     ) -> list[str]:
         self.trust = int(clamp(self.trust + outcome.trust_delta, 0, TRUST_LIMIT))
         self.pressure = int(clamp(self.pressure + outcome.pressure_delta, 0, PRESSURE_LIMIT))
@@ -100,6 +103,9 @@ class WorldState:
         if location_shifted != location_current:
             self.location_status[location_name] = location_shifted
             notes.append(f"Location status shifted to {location_shifted.value}.")
+        record_notes = list(outcome.notes)
+        if extra_notes:
+            record_notes.extend([note for note in extra_notes if note])
         self.case_history.append(
             CaseRecord(
                 case_id=case_id,
@@ -110,7 +116,7 @@ class WorldState:
                 outcome=outcome.arrest_result.value,
                 trust_delta=outcome.trust_delta,
                 pressure_delta=outcome.pressure_delta,
-                notes=list(outcome.notes),
+                notes=record_notes,
             )
         )
         return notes
