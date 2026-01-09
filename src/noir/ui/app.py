@@ -18,14 +18,19 @@ from noir.deduction.validation import validate_hypothesis
 from noir.domain.enums import RoleTag
 from noir.investigation.actions import (
     arrest,
+    bait,
     follow_neighbor_lead,
     interview,
+    raid,
     rossmo_lite,
     request_cctv,
+    request_warrant,
     set_profile,
     set_hypothesis,
+    stakeout,
     submit_forensics,
     tech_sweep,
+    visit_location,
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
@@ -37,8 +42,9 @@ from noir.investigation.leads import (
     build_neighbor_leads,
     format_neighbor_lead,
 )
+from noir.investigation.operations import OperationTier, OperationType, WarrantType
 from noir.investigation.outcomes import TRUST_LIMIT, resolve_case_outcome
-from noir.investigation.results import ActionOutcome, InvestigationState
+from noir.investigation.results import ActionOutcome, InvestigationState, LocationState
 from noir.locations.profiles import ScenePOI
 from noir.narrative.gaze import (
     GazeMode,
@@ -55,8 +61,14 @@ from noir.narrative.recaps import (
     build_partner_line,
     build_previously_on,
 )
+from noir.narrative.endings import build_final_ending, check_early_ending
 from noir.narrative.debriefs import build_post_arrest_statement
-from noir.nemesis import PatternTracker
+from noir.nemesis import (
+    PatternTracker,
+    apply_nemesis_case_outcome,
+    create_nemesis_state,
+    plan_nemesis_case,
+)
 from noir.presentation.evidence import (
     CCTVReport,
     ForensicObservation,
@@ -75,7 +87,7 @@ from noir.util.rng import Rng
 from noir.util.grammar import normalize_line
 from noir.persistence.db import WorldStore
 from noir.world.autonomy import apply_autonomy
-from noir.world.state import CaseStartModifiers, PersonRecord, WorldState
+from noir.world.state import CaseStartModifiers, EndgameState, PersonRecord, WorldState
 
 
 @dataclass
@@ -203,16 +215,23 @@ class Phase05App(App):
         self.seed = seed if seed is not None else config.SEED
         self.case_id = case_id
         self.base_rng = Rng(self.seed)
-        self.case_index = 1
         self.world_store = WorldStore(world_db) if world_db else None
         if self.world_store and reset_world:
             self.world_store.reset_world_state()
         self.world = self.world_store.load_world_state() if self.world_store else WorldState()
+        self.case_index = self.world.campaign.episode_index
+        if self.world.nemesis_state is None:
+            self.world.nemesis_state = create_nemesis_state(
+                self.base_rng.fork("nemesis-init")
+            )
+            if self.world_store:
+                self.world_store.save_world_state(self.world)
         self.case_start_tick = self.world.tick
         self.case_archetype = case_archetype
         self.gaze_mode = gaze_mode if gaze_mode is not None else GazeMode.FORENSIC
         self.district = "unknown"
         self.location_name = "unknown"
+        self.location_roster: dict[str, dict] = {}
         self.case_modifiers = None
         self.state: InvestigationState | None = None
         self.board = DeductionBoard()
@@ -236,7 +255,7 @@ class Phase05App(App):
         ]
         self.active_tab = "evidence"
         self.view_mode = "briefing"
-        self.season = 1
+        self.season = self.world.campaign.season_index
         self.episode_code = ""
         self.episode_title = ""
         self.briefing_title = "Briefing"
@@ -274,7 +293,7 @@ class Phase05App(App):
                     yield VerticalScroll(Static("", id="detail_view", expand=True), id="detail")
                 yield RichLog(id="wire", wrap=True)
                 yield ListView(id="actions")
-                yield Input(placeholder="Enter command (1-11 or q)...", id="command")
+                yield Input(placeholder="Enter command (1-13 or q)...", id="command")
 
     def on_mount(self) -> None:
         self._has_mounted = True
@@ -523,7 +542,7 @@ class Phase05App(App):
             f"Trust {self.state.trust}/{TRUST_LIMIT}  "
             f"Gaze {gaze_label(self.gaze_mode)} (G: toggle)"
         )
-        lines = [time_line]
+        lines = [time_line, f"Location: {self.location_name} ({self.district})"]
         scene_mode = None
         case_archetype = None
         scene_layout = self.case_facts.get("scene_layout")
@@ -771,18 +790,32 @@ class Phase05App(App):
         has_evidence = bool(self.state.knowledge.known_evidence)
         has_hypothesis = self.board.hypothesis is not None
         has_neighbor = bool(self.state.neighbor_leads)
+        has_other_location = any(
+            loc.location_id != self.state.active_location_id
+            for loc in self.state.location_states.values()
+        )
+        endgame_ready = self.world.endgame_ready()
+        has_warrant = (
+            WarrantType.ARREST.value in self.state.warrant_grants
+            or WarrantType.SEARCH.value in self.state.warrant_grants
+        )
         return [
-            {"cmd": "1", "label": "Visit scene", "enabled": True},
-            {"cmd": "2", "label": "Interview witness", "enabled": has_witness},
-            {"cmd": "3", "label": "Request CCTV", "enabled": True},
-            {"cmd": "4", "label": "Submit forensics", "enabled": True},
-            {"cmd": "5", "label": "Set hypothesis", "enabled": has_evidence},
-            {"cmd": "6", "label": "Profiling summary", "enabled": True},
-            {"cmd": "7", "label": "Arrest suspect", "enabled": has_hypothesis},
-            {"cmd": "8", "label": "Follow neighbor lead", "enabled": has_neighbor},
-            {"cmd": "9", "label": "Set profile", "enabled": has_evidence},
-            {"cmd": "10", "label": "Analyst: Rossmo-lite", "enabled": True},
-            {"cmd": "11", "label": "Analyst: Tech sweep", "enabled": True},
+            {"cmd": "1", "label": "Visit location", "enabled": has_other_location},
+            {"cmd": "2", "label": "Visit scene", "enabled": True},
+            {"cmd": "3", "label": "Interview witness", "enabled": has_witness},
+            {"cmd": "4", "label": "Request CCTV", "enabled": True},
+            {"cmd": "5", "label": "Submit forensics", "enabled": True},
+            {"cmd": "6", "label": "Set hypothesis", "enabled": has_evidence},
+            {"cmd": "7", "label": "Profiling summary", "enabled": True},
+            {"cmd": "8", "label": "Arrest suspect", "enabled": has_hypothesis},
+            {"cmd": "9", "label": "Follow neighbor lead", "enabled": has_neighbor},
+            {"cmd": "10", "label": "Set profile", "enabled": has_evidence},
+            {"cmd": "11", "label": "Analyst: Rossmo-lite", "enabled": True},
+            {"cmd": "12", "label": "Analyst: Tech sweep", "enabled": True},
+            {"cmd": "13", "label": "Request warrant", "enabled": has_hypothesis},
+            {"cmd": "14", "label": "Stakeout", "enabled": endgame_ready and has_hypothesis},
+            {"cmd": "15", "label": "Bait operation", "enabled": endgame_ready and has_hypothesis},
+            {"cmd": "16", "label": "Raid", "enabled": endgame_ready and has_hypothesis and has_warrant},
         ]
 
     def _refresh_actions(self) -> None:
@@ -926,6 +959,15 @@ class Phase05App(App):
         }
         return mapping.get(mobility, mobility.value)
 
+    def _warrant_label(self, warrant_type: WarrantType) -> str:
+        mapping = {
+            WarrantType.SEARCH: "Search warrant (property)",
+            WarrantType.ARREST: "Arrest warrant (person)",
+            WarrantType.DIGITAL: "Digital records warrant",
+            WarrantType.SURVEILLANCE: "Surveillance authorization",
+        }
+        return mapping.get(warrant_type, warrant_type.value)
+
     def _format_hour(self, hour: int) -> str:
         value = hour % 24
         suffix = "am" if value < 12 else "pm"
@@ -944,6 +986,33 @@ class Phase05App(App):
         value = confidence.value if hasattr(confidence, "value") else str(confidence)
         mapping = {"strong": "High", "medium": "Medium", "weak": "Low"}
         return mapping.get(value, value.capitalize())
+
+    def _nemesis_briefing_lines(self) -> list[str]:
+        state = self.world.nemesis_state
+        if state is None or not self.case_facts.get("nemesis_case"):
+            return []
+        lines: list[str] = []
+        if state.exposure >= 3:
+            lines.append("Pattern exposure is rising; expect visibility.")
+        elif state.exposure >= 1:
+            lines.append("Pattern exposure is building; stay alert.")
+        if state.profile.failure_echo:
+            lines.append(f"Tone feels {state.profile.failure_echo} in the file.")
+        return lines
+
+    def _nemesis_method_compromised(self) -> bool:
+        for item in self.presentation.evidence:
+            if item.id not in self.state.knowledge.known_evidence:
+                continue
+            if isinstance(item, ForensicsResult):
+                confidence = (
+                    item.confidence.value
+                    if hasattr(item.confidence, "value")
+                    else str(item.confidence)
+                )
+                if confidence in {"medium", "strong"}:
+                    return True
+        return False
 
     def _primary_role_tag(self, role_tags: list[RoleTag]) -> str:
         if RoleTag.WITNESS in role_tags:
@@ -1050,6 +1119,31 @@ class Phase05App(App):
             return f"{label}: {description}"
         return label
 
+    def _location_state_from_entry(self, entry: dict) -> LocationState:
+        scene_layout = entry.get("scene_layout") or {}
+        poi_rows = scene_layout.get("pois", []) or []
+        scene_pois = [ScenePOI(**row) for row in poi_rows if isinstance(row, dict)]
+        body_poi_id = entry.get("body_poi_id") or entry.get("primary_poi_id") or None
+        return LocationState(
+            location_id=entry["location_id"],
+            name=entry.get("name", "unknown"),
+            district=entry.get("district", "unknown"),
+            scene_pois=scene_pois,
+            visited_poi_ids=set(),
+            body_poi_id=body_poi_id,
+            neighbor_leads=build_neighbor_leads(scene_layout),
+        )
+
+    def _set_active_location(self, location_state: LocationState) -> None:
+        self.state.scene_pois = location_state.scene_pois
+        self.state.visited_poi_ids = location_state.visited_poi_ids
+        self.state.body_poi_id = location_state.body_poi_id
+        self.state.neighbor_leads = location_state.neighbor_leads
+        self.state.active_location_id = location_state.location_id
+        self.location_id = location_state.location_id
+        self.location_name = location_state.name
+        self.district = location_state.district
+
     def _poi_lines(self) -> list[str]:
         if not self.state.scene_pois:
             return ["(none)"]
@@ -1119,6 +1213,22 @@ class Phase05App(App):
 
     def _handle_command(self, value: str) -> None:
         if value == "1":
+            locations = [
+                loc
+                for loc in self.state.location_states.values()
+                if loc.location_id != self.state.active_location_id
+            ]
+            if not locations:
+                self._write("No other locations available.")
+                return
+            self.prompt_state = PromptState(step="visit_location", options=locations)
+            lines = ["Choose a location:"]
+            for idx, loc in enumerate(locations, start=1):
+                lines.append(f"{idx}) {loc.name} ({loc.district})")
+            self._set_prompt("Visit location", lines)
+            self._set_prompt_active(True)
+            return
+        if value == "2":
             body_poi = None
             if self.state.body_poi_id:
                 for poi in self.state.scene_pois:
@@ -1163,16 +1273,16 @@ class Phase05App(App):
             result = visit_scene(self.truth, self.presentation, self.state, self.location_id)
             self._apply_action_result(result)
             return
-        if value == "2":
+        if value == "3":
             result = self._interview_witness()
             if result:
                 self._apply_action_result(result)
             return
-        if value == "3":
+        if value == "4":
             result = request_cctv(self.truth, self.presentation, self.state, self.location_id)
             self._apply_action_result(result)
             return
-        if value == "4":
+        if value == "5":
             result = submit_forensics(
                 self.truth,
                 self.presentation,
@@ -1182,10 +1292,10 @@ class Phase05App(App):
             )
             self._apply_action_result(result)
             return
-        if value == "5":
+        if value == "6":
             self._start_hypothesis_prompt()
             return
-        if value == "6":
+        if value == "7":
             context_lines = self.world.context_lines(self.district, self.location_name)
             summary = build_profiling_summary(
                 self.presentation,
@@ -1200,7 +1310,7 @@ class Phase05App(App):
                 self._write(line)
             self._refresh_detail(None)
             return
-        if value == "7":
+        if value == "8":
             if self.board.hypothesis is None:
                 self._write("Set a hypothesis before arrest.")
                 return
@@ -1216,7 +1326,7 @@ class Phase05App(App):
             if result.action == ActionType.ARREST:
                 self._finalize_arrest()
             return
-        if value == "8":
+        if value == "9":
             if not self.state.neighbor_leads:
                 self._write("No neighbor leads available.")
                 return
@@ -1240,10 +1350,10 @@ class Phase05App(App):
             self._set_prompt("Neighbor lead", lines)
             self._set_prompt_active(True)
             return
-        if value == "9":
+        if value == "10":
             self._start_profile_prompt()
             return
-        if value == "10":
+        if value == "11":
             mobility = (
                 self.state.profile.mobility
                 if self.state.profile is not None
@@ -1263,7 +1373,7 @@ class Phase05App(App):
             result = rossmo_lite(self.truth, self.state, mobility)
             self._apply_action_result(result)
             return
-        if value == "11":
+        if value == "12":
             result = tech_sweep(
                 self.truth,
                 self.presentation,
@@ -1271,6 +1381,50 @@ class Phase05App(App):
                 self.location_id,
             )
             self._apply_action_result(result)
+            return
+        if value == "13":
+            if self.board.hypothesis is None:
+                self._write("Set a hypothesis before requesting a warrant.")
+                return
+            self.prompt_state = PromptState(step="warrant_type", options=list(WarrantType))
+            lines = ["Choose warrant type:"]
+            for idx, option in enumerate(self.prompt_state.options, start=1):
+                lines.append(f"{idx}) {self._warrant_label(option)}")
+            self._set_prompt("Warrant request", lines)
+            self._set_prompt_active(True)
+            return
+        if value == "14":
+            if not self.world.endgame_ready():
+                self._write("Endgame operations are not ready yet.")
+                return
+            if self.board.hypothesis is None:
+                self._write("Set a hypothesis before running a stakeout.")
+                return
+            self._start_operation_prompt(OperationType.STAKEOUT, "Stakeout evidence")
+            return
+        if value == "15":
+            if not self.world.endgame_ready():
+                self._write("Endgame operations are not ready yet.")
+                return
+            if self.board.hypothesis is None:
+                self._write("Set a hypothesis before running bait.")
+                return
+            self._start_operation_prompt(OperationType.BAIT, "Bait evidence")
+            return
+        if value == "16":
+            if not self.world.endgame_ready():
+                self._write("Endgame operations are not ready yet.")
+                return
+            if self.board.hypothesis is None:
+                self._write("Set a hypothesis before running a raid.")
+                return
+            if not (
+                WarrantType.ARREST.value in self.state.warrant_grants
+                or WarrantType.SEARCH.value in self.state.warrant_grants
+            ):
+                self._write("Raid requires an arrest or search warrant.")
+                return
+            self._start_operation_prompt(OperationType.RAID, "Raid evidence")
             return
         self._write("Unknown action.")
 
@@ -1286,6 +1440,22 @@ class Phase05App(App):
             self._write(f"[{result.action}] {result.summary}")
         for item in result.revealed:
             self._write(self._wire_evidence_line(item))
+        if result.revealed:
+            for item in result.revealed:
+                location_id_value = getattr(item, "location_id", None)
+                if location_id_value is None:
+                    continue
+                key = str(location_id_value)
+                if key in self.state.location_states:
+                    continue
+                entry = self.location_roster.get(key)
+                if entry is None:
+                    continue
+                location_state = self._location_state_from_entry(entry)
+                self.state.location_states[key] = location_state
+                result.notes.append(
+                    f"New location unlocked: {location_state.name} ({location_state.district})."
+                )
         for note in result.notes:
             self._write(f"- {note}")
         if result.revealed:
@@ -1293,8 +1463,39 @@ class Phase05App(App):
         elif self.selected_evidence_id is None and self.state.knowledge.known_evidence:
             self.selected_evidence_id = self.state.knowledge.known_evidence[0]
         self.last_result = result
+        ending = self._handle_operation_result(result)
+        if ending:
+            self._show_ending(ending)
+            return
         self._refresh_header()
         self._refresh_lists()
+
+    def _handle_operation_result(self, result):
+        if result.operation_type is None or result.operation_tier is None:
+            return None
+        if self.world.campaign.endgame_state == EndgameState.READY:
+            self.world.activate_endgame()
+        if result.operation_type != OperationType.RAID:
+            return None
+        if result.operation_tier == OperationTier.CLEAN:
+            result_key = "captured_clean"
+        elif result.operation_tier == OperationTier.PARTIAL:
+            result_key = "captured_shaky"
+        elif result.operation_tier == OperationTier.BURN:
+            result_key = "raid_wrong"
+        else:
+            return None
+        self.world.resolve_endgame(result_key)
+        return build_final_ending(self.world)
+
+    def _show_ending(self, ending) -> None:
+        self._write("")
+        self._write(ending.title)
+        for line in ending.lines:
+            self._write(line)
+        if self.world_store:
+            self.world_store.save_world_state(self.world)
+        self.exit()
 
     def _finalize_arrest(self) -> None:
         self.board.sync_from_state(self.state)
@@ -1323,6 +1524,23 @@ class Phase05App(App):
         debrief_notes = []
         if debrief_lines:
             debrief_notes = [f"Post-arrest: {debrief_lines[0]}"]
+        nemesis_notes: list[str] = []
+        if self.world.nemesis_state and self.case_facts.get("nemesis_case"):
+            visibility = int(self.case_facts.get("nemesis_visibility", 1))
+            method_category = self.case_facts.get("nemesis_method") or None
+            method_compromised = self._nemesis_method_compromised()
+            nemesis_notes = apply_nemesis_case_outcome(
+                self.world.nemesis_state,
+                True,
+                visibility,
+                outcome.arrest_result.value,
+                method_category,
+                method_compromised,
+                self.base_rng.fork(f"nemesis-outcome-{self.case_index}"),
+            )
+            self.world.nemesis_exposure = self.world.nemesis_state.exposure
+        if nemesis_notes:
+            debrief_notes.extend(nemesis_notes)
         case_end_tick = self.case_start_tick + self.state.time
         world_notes = self.world.apply_case_outcome(
             outcome,
@@ -1334,10 +1552,9 @@ class Phase05App(App):
             case_end_tick,
             extra_notes=debrief_notes,
         )
-        if self.world_store:
-            self.world_store.save_world_state(self.world)
-            self.world_store.record_case(self.world.case_history[-1])
         for note in world_notes:
+            self._write(f"- {note}")
+        for note in nemesis_notes:
             self._write(f"- {note}")
         end_rng = self.base_rng.fork(f"end-{self.case_index}")
         for line in build_end_tag(end_rng, outcome.arrest_result.value):
@@ -1354,7 +1571,30 @@ class Phase05App(App):
             self._write("Pattern addendum filed.")
         else:
             self.last_pattern_addendum = None
-        self.case_index += 1
+        pattern_plan = self.truth.case_meta.get("pattern_plan")
+        pattern_type = None
+        if isinstance(pattern_plan, dict):
+            pattern_type = pattern_plan.get("pattern_type")
+        profile_used = self.state.profile is not None
+        proof_met = validation.is_correct_suspect and validation.probable_cause
+        identity_notes = self.world.update_identity(
+            self.state.style_counts,
+            risky_flag=not validation.probable_cause,
+        )
+        if identity_notes:
+            debrief_notes.extend(identity_notes)
+        self.world.update_closing_in(pattern_type, profile_used, proof_met)
+        early_ending = check_early_ending(self.world)
+        if early_ending:
+            self._show_ending(early_ending)
+            return
+        self.world.advance_episode()
+        self.case_index = self.world.campaign.episode_index
+        self.season = self.world.campaign.season_index
+        self.world.ensure_case_queue()
+        if self.world_store:
+            self.world_store.save_world_state(self.world)
+            self.world_store.record_case(self.world.case_history[-1])
         self.case_start_tick = self.world.tick
         self._start_case(self.case_index)
         self._write(f"New case {self.truth.case_id} started.")
@@ -1364,25 +1604,72 @@ class Phase05App(App):
     def _start_case(self, case_index: int, case_id_override: str | None = None) -> None:
         case_rng = self.base_rng.fork(f"case-{case_index}")
         case_id = case_id_override or f"case_{self.seed}_{case_index}"
+        case_payload = None
+        case_archetype = self.case_archetype
+        if case_archetype is None:
+            case_payload = self.world.pop_next_case()
+            if case_payload:
+                case_archetype = self._parse_case_archetype(
+                    case_payload.get("archetype")
+                )
+        nemesis_plan = None
+        if self.world.nemesis_state is not None:
+            nemesis_plan = plan_nemesis_case(
+                self.world.nemesis_state, case_rng.fork("nemesis-plan")
+            )
         self.truth, self.case_facts = generate_case(
             case_rng,
             case_id=case_id,
             world=self.world,
-            case_archetype=self.case_archetype,
+            case_archetype=case_archetype,
+            nemesis_plan=nemesis_plan,
         )
         pattern_plan = self.pattern_tracker.plan_case(case_id, case_index)
         self.truth.case_meta["pattern_plan"] = pattern_plan.to_case_meta()
         self.presentation = project_case(self.truth, case_rng.fork("projection"))
         self.case_start_tick = self.world.tick
         location = self.truth.locations.get(self.case_facts["crime_scene_id"])
-        self.district = location.district if location else "unknown"
-        self.location_name = location.name if location else "unknown"
+        location_entries = self.case_facts.get("locations") or []
+        if not location_entries:
+            location_entries = [
+                {
+                    "location_id": self.case_facts["crime_scene_id"],
+                    "name": location.name if location else "unknown",
+                    "district": location.district if location else "unknown",
+                    "role": "primary",
+                    "scene_layout": self.case_facts.get("scene_layout") or {},
+                    "primary_poi_id": self.case_facts.get("primary_poi_id") or "",
+                    "body_poi_id": self.case_facts.get("body_poi_id") or "",
+                }
+            ]
+        self.location_roster = {
+            str(entry.get("location_id")): entry
+            for entry in location_entries
+            if entry.get("location_id")
+        }
+        primary_location_id = (
+            self.case_facts.get("primary_location_id") or self.case_facts["crime_scene_id"]
+        )
+        primary_entry = None
+        for entry in location_entries:
+            if entry.get("location_id") == primary_location_id or entry.get("role") == "primary":
+                primary_entry = entry
+                break
+        if primary_entry is None:
+            primary_entry = location_entries[0]
+        primary_state = self._location_state_from_entry(primary_entry)
+        self.district = primary_state.district
+        self.location_name = primary_state.name
         intro_lines: list[str] = []
         if case_index == 1:
             intro_lines.extend(build_previously_on(self.world))
+        self.season = self.world.campaign.season_index
         episode_rng = self.base_rng.fork(f"episode-{case_index}")
         case_archetype = self.case_facts.get("case_archetype") if isinstance(self.case_facts, dict) else None
-        episode_kind = "copycat" if case_archetype == CaseArchetype.PATTERN.value else "normal"
+        if self.world.endgame_ready():
+            episode_kind = "nemesis"
+        else:
+            episode_kind = "copycat" if case_archetype == CaseArchetype.PATTERN.value else "normal"
         tag_map = {
             CaseArchetype.PRESSURE.value: ["pressure", "escalation"],
             CaseArchetype.PATTERN.value: ["recurrence", "copycat"],
@@ -1400,7 +1687,7 @@ class Phase05App(App):
         )
         self.episode_code = f"S{self.season}E{case_index}"
         self.episode_title = episode_title
-        intro_lines.append(f"Episode: {self.episode_code} — {episode_title}")
+        intro_lines.append(f"Episode: {self.episode_code} - {episode_title}")
         intro_lines.extend(build_cold_open(episode_rng, self.location_name))
         intro_lines.extend(build_partner_line(episode_rng))
         briefing_lines = [line for line in intro_lines if not line.startswith("Episode:")]
@@ -1413,6 +1700,13 @@ class Phase05App(App):
         self.case_modifiers = self.world.case_start_modifiers(
             self.district, self.location_name
         )
+        nemesis_lines = self._nemesis_briefing_lines()
+        if nemesis_lines:
+            self.case_modifiers = CaseStartModifiers(
+                cooperation=self.case_modifiers.cooperation,
+                lead_deadline_delta=self.case_modifiers.lead_deadline_delta,
+                briefing_lines=self.case_modifiers.briefing_lines + nemesis_lines,
+            )
         briefing_lines.extend(self.case_modifiers.briefing_lines)
         if self.last_pattern_addendum:
             briefing_lines.append(
@@ -1431,18 +1725,19 @@ class Phase05App(App):
             start_time=self.state.time,
             deadline_delta=self.case_modifiers.lead_deadline_delta,
         )
-        scene_layout = self.case_facts.get("scene_layout") or {}
-        poi_rows = scene_layout.get("pois", []) or []
-        self.state.scene_pois = [ScenePOI(**row) for row in poi_rows if isinstance(row, dict)]
-        body_poi_id = self.case_facts.get("body_poi_id") or self.case_facts.get("primary_poi_id")
-        self.state.body_poi_id = body_poi_id or None
-        self.state.neighbor_leads = build_neighbor_leads(scene_layout)
+        self.state.location_states[str(primary_state.location_id)] = primary_state
+        for entry in location_entries:
+            if entry is primary_entry:
+                continue
+            related_state = self._location_state_from_entry(entry)
+            self.state.location_states[str(related_state.location_id)] = related_state
+            break
+        self._set_active_location(primary_state)
         self.board = DeductionBoard()
         self.prompt_state = None
         self.selected_evidence_id = None
         self.last_result = None
         self.profile_lines = []
-        self.location_id = self.case_facts["crime_scene_id"]
         self.item_id = self.case_facts["weapon_id"]
         self._sync_people(self.truth.case_id)
         if has_returning:
@@ -1536,6 +1831,40 @@ class Phase05App(App):
         self._set_prompt("Hypothesis suspect", lines)
         self._set_prompt_active(True)
 
+    def _set_evidence_prompt(
+        self,
+        title: str,
+        step: str,
+        data: dict[str, Any],
+        evidence_items: list[Any],
+    ) -> None:
+        self.prompt_state = PromptState(step=step, data=data, options=evidence_items)
+        lines = ["Choose 1 to 3 evidence items (comma-separated):"]
+        for idx, item in enumerate(evidence_items, start=1):
+            detail_lines = self._format_evidence_detail(idx, item)
+            lines.extend(detail_lines)
+            lines.append("")
+        if lines and lines[-1] == "":
+            lines.pop()
+        self._set_prompt(title, lines)
+        self._set_prompt_active(True)
+
+    def _start_operation_prompt(self, op_type: OperationType, title: str) -> None:
+        evidence_items = [
+            item
+            for item in self.presentation.evidence
+            if item.id in set(self.state.knowledge.known_evidence)
+        ]
+        if not evidence_items:
+            self._write("No evidence collected yet.")
+            return
+        self._set_evidence_prompt(
+            title,
+            "operation_evidence",
+            {"op_type": op_type},
+            evidence_items,
+        )
+
     def _start_profile_prompt(self) -> None:
         options = list(ProfileOrganization)
         self.prompt_state = PromptState(step="profile_org", options=options)
@@ -1554,6 +1883,23 @@ class Phase05App(App):
             self._set_prompt_active(False)
             return
         step = self.prompt_state.step
+        if step == "visit_location":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            location_state = self.prompt_state.options[selection]
+            self.prompt_state = None
+            self._set_prompt_active(False)
+            result = visit_location(
+                self.state,
+                location_state.location_id,
+                location_state.name,
+            )
+            if result.outcome == ActionOutcome.SUCCESS:
+                self._set_active_location(location_state)
+            self._apply_action_result(result)
+            return
         if step == "interview_witness":
             selection = self._parse_choice(value, len(self.prompt_state.options))
             if selection is None:
@@ -1759,6 +2105,89 @@ class Phase05App(App):
             )
             self._apply_action_result(result)
             return
+        if step == "warrant_type":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            warrant_type = self.prompt_state.options[selection]
+            evidence_items = [
+                item
+                for item in self.presentation.evidence
+                if item.id in set(self.state.knowledge.known_evidence)
+            ]
+            if not evidence_items:
+                self._write("No evidence collected yet.")
+                self.prompt_state = None
+                self._set_prompt_active(False)
+                return
+            self._set_evidence_prompt(
+                "Warrant evidence",
+                "warrant_evidence",
+                {"warrant_type": warrant_type},
+                evidence_items,
+            )
+            return
+        if step == "warrant_evidence":
+            evidence_ids = self._parse_indices(value, self.prompt_state.options)
+            if not evidence_ids:
+                self._write("Select at least one evidence item.")
+                return
+            data = self.prompt_state.data
+            self.prompt_state = None
+            self._set_prompt_active(False)
+            result = request_warrant(
+                self.truth,
+                self.presentation,
+                self.state,
+                self.board,
+                self.location_id,
+                data["warrant_type"],
+                evidence_ids,
+            )
+            self._apply_action_result(result)
+            return
+        if step == "operation_evidence":
+            evidence_ids = self._parse_indices(value, self.prompt_state.options)
+            if not evidence_ids:
+                self._write("Select at least one evidence item.")
+                return
+            data = self.prompt_state.data
+            self.prompt_state = None
+            self._set_prompt_active(False)
+            op_type = data.get("op_type")
+            if op_type == OperationType.STAKEOUT:
+                result = stakeout(
+                    self.truth,
+                    self.presentation,
+                    self.state,
+                    self.board,
+                    self.location_id,
+                    evidence_ids,
+                )
+            elif op_type == OperationType.BAIT:
+                result = bait(
+                    self.truth,
+                    self.presentation,
+                    self.state,
+                    self.board,
+                    self.location_id,
+                    evidence_ids,
+                )
+            elif op_type == OperationType.RAID:
+                result = raid(
+                    self.truth,
+                    self.presentation,
+                    self.state,
+                    self.board,
+                    self.location_id,
+                    evidence_ids,
+                )
+            else:
+                self._write("Operation unavailable.")
+                return
+            self._apply_action_result(result)
+            return
         if step == "hyp_suspect":
             selection = self._parse_choice(value, len(self.prompt_state.options))
             if selection is None:
@@ -1844,3 +2273,15 @@ class Phase05App(App):
             if 0 <= index < count:
                 indices.append(index)
         return list(dict.fromkeys(indices))
+
+    def _parse_case_archetype(
+        self, value: str | CaseArchetype | None
+    ) -> CaseArchetype | None:
+        if isinstance(value, CaseArchetype):
+            return value
+        if not value:
+            return None
+        for archetype in CaseArchetype:
+            if archetype.value == value:
+                return archetype
+        return None

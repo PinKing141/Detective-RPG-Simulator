@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, List
+from uuid import UUID
 
 from noir.domain.enums import ConfidenceBand, EvidenceType, EventKind, ItemType, RoleTag
 from noir.presentation.evidence import (
@@ -139,6 +140,32 @@ def _downgrade(confidence: ConfidenceBand) -> ConfidenceBand:
     return confidence
 
 
+def _weighted_choice(rng: Rng, options: dict[str, float]) -> str | None:
+    if not options:
+        return None
+    total = sum(max(0.0, value) for value in options.values())
+    if total <= 0:
+        return rng.choice(list(options.keys()))
+    pick = rng.random() * total
+    cumulative = 0.0
+    for key, weight in options.items():
+        cumulative += max(0.0, weight)
+        if pick <= cumulative:
+            return key
+    return next(iter(options.keys()))
+
+
+def _uuid_from(value: object) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _pattern_plan(truth: TruthState) -> dict[str, Any] | None:
     plan = truth.case_meta.get("pattern_plan")
     if isinstance(plan, dict):
@@ -271,16 +298,39 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
         else kill_event.timestamp + 2
     )
 
-    location = truth.locations.get(kill_event.location_id)
+    location_entries = truth.case_meta.get("locations")
+    if not isinstance(location_entries, list) or not location_entries:
+        location_entries = [
+            {
+                "location_id": str(kill_event.location_id),
+                "archetype_id": truth.case_meta.get("location_archetype"),
+                "scene_layout": truth.case_meta.get("scene_layout"),
+                "role": "primary",
+            }
+        ]
+    primary_entry = None
+    for entry in location_entries:
+        entry_id = _uuid_from(entry.get("location_id"))
+        if entry_id and entry_id == kill_event.location_id:
+            primary_entry = entry
+            break
+    if primary_entry is None:
+        primary_entry = next(
+            (entry for entry in location_entries if entry.get("role") == "primary"),
+            location_entries[0],
+        )
+
+    primary_location_id = _uuid_from(primary_entry.get("location_id")) or kill_event.location_id
+    location = truth.locations.get(primary_location_id)
     cctv_available = bool(location and "cctv" in location.tags)
-    location_archetype = truth.case_meta.get("location_archetype")
+    location_archetype = primary_entry.get("archetype_id") or truth.case_meta.get("location_archetype")
     profiles = load_location_profiles()
     archetype = profiles["archetypes"].get(location_archetype, {}) if location_archetype else {}
     presence_curve = archetype.get("presence_curve", {}) or {}
     visibility = archetype.get("visibility", {}) or {}
     surveillance = archetype.get("surveillance", {}) or {}
     logs = archetype.get("logs", []) or []
-    scene_layout = truth.case_meta.get("scene_layout") or {}
+    scene_layout = primary_entry.get("scene_layout") or truth.case_meta.get("scene_layout") or {}
     scene_pois = scene_layout.get("pois", []) or []
     poi_ids = [poi.get("poi_id") for poi in scene_pois if poi.get("poi_id")]
     poi_zone = {
@@ -291,8 +341,13 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
         for poi in scene_pois
         if poi.get("poi_id")
     }
-    primary_poi_id = truth.case_meta.get("primary_poi_id")
-    body_poi_id = truth.case_meta.get("body_poi_id") or primary_poi_id
+    poi_labels = {
+        poi.get("poi_id"): poi.get("label")
+        for poi in scene_pois
+        if poi.get("poi_id")
+    }
+    primary_poi_id = primary_entry.get("primary_poi_id") or truth.case_meta.get("primary_poi_id")
+    body_poi_id = primary_entry.get("body_poi_id") or truth.case_meta.get("body_poi_id") or primary_poi_id
     if not body_poi_id and poi_ids:
         body_poi_id = poi_ids[0]
     if not primary_poi_id:
@@ -305,6 +360,14 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
     wound_poi_id = body_poi_id or primary_poi_id
     tod_poi_id = body_poi_id or primary_poi_id
     entry_poi_id = non_body_poi_ids[0] if non_body_poi_ids else (body_poi_id or primary_poi_id)
+
+    bucket = _time_bucket(kill_event.timestamp)
+    presence = float(presence_curve.get(bucket, 0.5))
+    visibility_score = (
+        float(visibility.get("lighting", 0.5))
+        + (1.0 - float(visibility.get("occlusion", 0.5)))
+        + (1.0 - float(visibility.get("noise", 0.5)))
+    ) / 3.0
 
     offender = next(
         (person for person in truth.people.values() if RoleTag.OFFENDER in person.role_tags),
@@ -321,13 +384,6 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
         person for person in truth.people.values() if RoleTag.WITNESS in person.role_tags
     ]
     if witnesses:
-        bucket = _time_bucket(kill_event.timestamp)
-        presence = float(presence_curve.get(bucket, 0.5))
-        visibility_score = (
-            float(visibility.get("lighting", 0.5))
-            + (1.0 - float(visibility.get("occlusion", 0.5)))
-            + (1.0 - float(visibility.get("noise", 0.5)))
-        ) / 3.0
         for witness in witnesses:
             witness_rng = rng.fork(f"witness:{witness.id}")
             relation = (
@@ -387,7 +443,7 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 source="Traffic Control",
                 time_collected=kill_event.timestamp + 1,
                 confidence=ConfidenceBand.STRONG,
-                location_id=kill_event.location_id,
+                location_id=primary_location_id,
                 observed_person_ids=list(kill_event.participants),
                 time_window=(kill_event.timestamp - 1, kill_event.timestamp + 1),
             )
@@ -407,6 +463,9 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
     log_rng = rng.fork("scene-logs")
     log_sources = [source for source in logs if isinstance(source, str)]
     log_chance = min(0.85, 0.15 * len(log_sources) + float(surveillance.get("cctv", 0.0)))
+    poi_digital_added = False
+    poi_testimonial_added = False
+    log_poi_id = None
     if log_candidates and (log_sources or cctv_candidates):
         omit_chance = _clamp(0.5 - log_chance, 0.05, 0.8)
         if not maybe_omit(omit_chance, log_rng):
@@ -433,12 +492,14 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                     time_collected=kill_event.timestamp + 1,
                     confidence=confidence,
                     poi_id=poi_id,
-                    location_id=kill_event.location_id,
+                    location_id=primary_location_id,
                     observed_person_ids=[],
                     time_window=time_window,
                 )
             )
             cctv_added = True
+            poi_digital_added = True
+            log_poi_id = poi_id
 
     weapon_items = [item for item in truth.items.values() if item.item_type == ItemType.WEAPON]
     forensics_added = False
@@ -458,6 +519,7 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 finding=f"Trace evidence consistent with {item.name}.",
                 method="trace",
                 method_category=method_category,
+                location_id=primary_location_id,
             )
         )
         forensics_added = True
@@ -493,6 +555,7 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 observation=f"Body cooling suggests death {_format_time_phrase(tod_window)}.",
                 tod_window=tod_window,
                 stage_hint=_rigor_stage(hours_since),
+                location_id=primary_location_id,
             )
         )
         wound_class = _wound_class(method_category)
@@ -512,6 +575,7 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 poi_id=wound_poi_id or primary_poi_id,
                 observation=observation,
                 wound_class=wound_class,
+                location_id=primary_location_id,
             )
         )
         entry_confidence = ConfidenceBand.MEDIUM
@@ -532,6 +596,7 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 confidence=entry_confidence,
                 poi_id=entry_poi_id or primary_poi_id,
                 observation=entry_observation,
+                location_id=primary_location_id,
             )
         )
 
@@ -545,6 +610,80 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
         obs_rng = rng.fork("poi-trace")
         obs_rng.shuffle(extra_pois)
         for poi_id in extra_pois:
+            if poi_id == log_poi_id:
+                continue
+            tags = poi_tags.get(poi_id, [])
+            if not poi_digital_added and (
+                _is_cctv_poi(poi_id, tags) or _is_log_poi(poi_id, tags)
+            ):
+                poi_rng = obs_rng.fork(f"poi-digital:{poi_id}")
+                label = poi_rng.choice(log_sources) if log_sources else "access log"
+                summary = f"Access log ({label.replace('_', ' ').title()})"
+                source = "Facility Log"
+                confidence = ConfidenceBand.MEDIUM
+                if not log_sources:
+                    summary = "CCTV console still"
+                    source = "Security Desk"
+                    confidence = ConfidenceBand.WEAK
+                time_window = fuzz_time(
+                    kill_event.timestamp,
+                    sigma=2.0,
+                    rng=poi_rng.fork("window"),
+                )
+                evidence.append(
+                    CCTVReport(
+                        evidence_type=EvidenceType.CCTV,
+                        summary=summary,
+                        source=source,
+                        time_collected=kill_event.timestamp + 1,
+                        confidence=confidence,
+                        poi_id=poi_id,
+                        location_id=kill_event.location_id,
+                        observed_person_ids=[],
+                        time_window=time_window,
+                    )
+                )
+                cctv_added = True
+                poi_digital_added = True
+                continue
+            if witnesses and not poi_testimonial_added and presence >= 0.35:
+                poi_rng = obs_rng.fork(f"poi-witness:{poi_id}")
+                witness = poi_rng.choice(witnesses)
+                time_window = fuzz_time(kill_event.timestamp, sigma=2.0, rng=poi_rng)
+                confidence = confidence_from_window(time_window)
+                if presence < 0.3 or visibility_score < 0.35:
+                    confidence = _downgrade(confidence)
+                see_chance = presence * visibility_score
+                if risk_tolerance >= 0.6:
+                    see_chance += 0.1
+                observed_person_ids: list = []
+                if offender and poi_rng.random() < _clamp(see_chance, 0.1, 0.75):
+                    observed_person_ids.append(offender.id)
+                poi_label = poi_labels.get(poi_id) or _poi_name(poi_id)
+                poi_phrase = poi_label.lower()
+                heard_prefix = "I think I heard" if confidence == ConfidenceBand.WEAK else "I heard"
+                saw_prefix = "I think I saw" if confidence == ConfidenceBand.WEAK else "I saw"
+                statement = f"{heard_prefix} movement near the {poi_phrase}."
+                if offender and observed_person_ids:
+                    statement = f"{saw_prefix} {offender.name} near the {poi_phrase}."
+                evidence.append(
+                    WitnessStatement(
+                        evidence_type=EvidenceType.TESTIMONIAL,
+                        summary="Witness statement (scene)",
+                        source=witness.name,
+                        time_collected=kill_event.timestamp + 1,
+                        confidence=confidence,
+                        witness_id=witness.id,
+                        statement=statement,
+                        reported_time_window=time_window,
+                        location_id=kill_event.location_id,
+                        observed_person_ids=observed_person_ids,
+                        poi_id=poi_id,
+                        uncertainty_hooks=["Scene-level account; no formal interview."],
+                    )
+                )
+                poi_testimonial_added = True
+                continue
             observation = obs_rng.choice(extra_notes)
             evidence.append(
                 ForensicObservation(
@@ -555,6 +694,7 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                     confidence=ConfidenceBand.WEAK,
                     poi_id=poi_id or primary_poi_id,
                     observation=observation,
+                    location_id=primary_location_id,
                 )
             )
 
@@ -582,6 +722,7 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                         confidence=_pattern_confidence(observation),
                         poi_id=poi_id or primary_poi_id,
                         observation=_pattern_primary_observation(primary, observation),
+                        location_id=primary_location_id,
                     )
                 )
             if support and support_present:
@@ -594,8 +735,144 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                         confidence=ConfidenceBand.MEDIUM,
                         poi_id=entry_poi_id or primary_poi_id,
                         observation=_pattern_support_observation(support),
+                        location_id=primary_location_id,
                     )
                 )
+
+    secondary_entries = [entry for entry in location_entries if entry is not primary_entry]
+    if secondary_entries:
+        offsite_rng = rng.fork("offsite")
+        for idx, entry in enumerate(secondary_entries):
+            entry_location_id = _uuid_from(entry.get("location_id"))
+            if not entry_location_id:
+                continue
+            entry_location = truth.locations.get(entry_location_id)
+            entry_layout = entry.get("scene_layout") or {}
+            entry_pois = entry_layout.get("pois", []) or []
+            entry_poi_ids = [poi.get("poi_id") for poi in entry_pois if poi.get("poi_id")]
+            entry_poi_tags = {
+                poi.get("poi_id"): poi.get("tags", [])
+                for poi in entry_pois
+                if poi.get("poi_id")
+            }
+            entry_poi_labels = {
+                poi.get("poi_id"): poi.get("label")
+                for poi in entry_pois
+                if poi.get("poi_id")
+            }
+            entry_archetype_id = entry.get("archetype_id")
+            entry_archetype = (
+                profiles["archetypes"].get(entry_archetype_id, {}) if entry_archetype_id else {}
+            )
+            entry_presence_curve = entry_archetype.get("presence_curve", {}) or {}
+            entry_visibility = entry_archetype.get("visibility", {}) or {}
+            entry_surveillance = entry_archetype.get("surveillance", {}) or {}
+            entry_logs = entry_archetype.get("logs", []) or []
+            bucket = _time_bucket(kill_event.timestamp)
+            entry_presence = float(entry_presence_curve.get(bucket, 0.35))
+            noise = float(entry_visibility.get("noise", 0.4))
+            witness_weight = max(0.05, entry_presence * (1.0 - noise))
+            cctv_weight = float(entry_surveillance.get("cctv", 0.0))
+            logs_weight = min(0.8, 0.2 + (0.1 * len(entry_logs))) if entry_logs else 0.0
+            choice = _weighted_choice(
+                offsite_rng.fork(f"choice:{idx}"),
+                {"cctv": cctv_weight, "logs": logs_weight, "witness": witness_weight},
+            )
+            if choice in {"cctv", "logs"}:
+                log_candidates = [
+                    poi_id
+                    for poi_id in entry_poi_ids
+                    if _is_log_poi(poi_id, entry_poi_tags.get(poi_id, []))
+                ]
+                cctv_candidates = [
+                    poi_id
+                    for poi_id in entry_poi_ids
+                    if _is_cctv_poi(poi_id, entry_poi_tags.get(poi_id, []))
+                ]
+                entry_poi_id = None
+                if choice == "logs" and log_candidates:
+                    entry_poi_id = offsite_rng.choice(log_candidates)
+                elif cctv_candidates:
+                    entry_poi_id = offsite_rng.choice(cctv_candidates)
+                elif entry_poi_ids:
+                    entry_poi_id = offsite_rng.choice(entry_poi_ids)
+                log_label = None
+                if choice == "logs" and entry_logs:
+                    log_label = offsite_rng.choice(entry_logs)
+                summary = "CCTV report (off-site)"
+                source = "Off-site CCTV"
+                confidence = ConfidenceBand.WEAK
+                if log_label:
+                    summary = f"Access log ({log_label.replace('_', ' ').title()})"
+                    source = "Facility Log"
+                    confidence = ConfidenceBand.MEDIUM
+                time_window = fuzz_time(
+                    kill_event.timestamp + offsite_rng.randint(-2, 2),
+                    sigma=2.5,
+                    rng=offsite_rng.fork(f"window:{idx}"),
+                )
+                evidence.append(
+                    CCTVReport(
+                        evidence_type=EvidenceType.CCTV,
+                        summary=summary,
+                        source=source,
+                        time_collected=kill_event.timestamp + 1,
+                        confidence=confidence,
+                        location_id=entry_location_id,
+                        observed_person_ids=[],
+                        time_window=time_window,
+                        poi_id=entry_poi_id,
+                    )
+                )
+                cctv_added = True
+                continue
+
+            if choice == "witness" and witnesses:
+                witness = offsite_rng.choice(witnesses)
+                time_window = fuzz_time(
+                    kill_event.timestamp + offsite_rng.randint(-2, 2),
+                    sigma=2.5,
+                    rng=offsite_rng.fork(f"witness-window:{idx}"),
+                )
+                confidence = confidence_from_window(time_window)
+                if entry_presence < 0.3:
+                    confidence = _downgrade(confidence)
+                place = place_with_article(entry_location.name if entry_location else "location")
+                statement = f"I heard activity near {place}."
+                observed_person_ids: list = []
+                evidence.append(
+                    WitnessStatement(
+                        evidence_type=EvidenceType.TESTIMONIAL,
+                        summary="Witness statement (off-site)",
+                        source=witness.name,
+                        time_collected=kill_event.timestamp + 1,
+                        confidence=confidence,
+                        witness_id=witness.id,
+                        statement=statement,
+                        reported_time_window=time_window,
+                        location_id=entry_location_id,
+                        observed_person_ids=observed_person_ids,
+                        poi_id=None,
+                        uncertainty_hooks=["Off-site account; limited context."],
+                    )
+                )
+                continue
+
+            entry_poi_id = entry_poi_ids[0] if entry_poi_ids else None
+            entry_label = entry_poi_labels.get(entry_poi_id) if entry_poi_id else None
+            label_text = entry_label or "area"
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (off-site)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=entry_poi_id,
+                    observation=f"Scene note from the {label_text.lower()}.",
+                    location_id=entry_location_id,
+                )
+            )
 
     if not cctv_added and not forensics_added:
         if cctv_available:
@@ -606,11 +883,11 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                     source="Traffic Control",
                     time_collected=kill_event.timestamp + 1,
                     confidence=ConfidenceBand.WEAK,
-                    location_id=kill_event.location_id,
-                    observed_person_ids=list(kill_event.participants),
-                    time_window=(kill_event.timestamp - 2, kill_event.timestamp + 2),
-                )
+                location_id=primary_location_id,
+                observed_person_ids=list(kill_event.participants),
+                time_window=(kill_event.timestamp - 2, kill_event.timestamp + 2),
             )
+        )
         elif weapon_items:
             item = weapon_items[0]
             method_category = _method_category_from_item(item.name)
@@ -625,6 +902,7 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                     finding=f"Partial trace evidence consistent with {item.name}.",
                     method="trace",
                     method_category=method_category,
+                    location_id=primary_location_id,
                 )
             )
 

@@ -9,7 +9,13 @@ from uuid import UUID
 from noir.deduction.board import ClaimType, DeductionBoard, Hypothesis
 from noir.domain.enums import ConfidenceBand, EvidenceType, EventKind, RoleTag
 from noir.domain.models import Person
-from noir.investigation.costs import ActionType, COSTS, clamp, would_exceed_limits
+from noir.investigation.costs import (
+    ActionType,
+    COSTS,
+    PRESSURE_LIMIT,
+    clamp,
+    would_exceed_limits,
+)
 from noir.investigation.dialog_graph import (
     choice_label_for,
     load_default_interview_graph,
@@ -38,6 +44,13 @@ from noir.investigation.leads import (
     shorten_lead,
     update_lead_statuses,
 )
+from noir.investigation.operations import (
+    OperationPlan,
+    OperationTier,
+    OperationType,
+    WarrantType,
+    resolve_operation,
+)
 from noir.investigation.results import ActionOutcome, ActionResult, InvestigationState
 from noir.locations.profiles import load_location_profiles
 from noir.presentation.evidence import CCTVReport, EvidenceItem, PresentationCase, WitnessStatement
@@ -53,6 +66,7 @@ from noir.profiling.profile import (
     ProfileMobility,
     ProfileOrganization,
 )
+from noir.investigation.outcomes import TRUST_LIMIT
 
 _NAME_GENERATOR = None
 DEFAULT_DISTRICTS = ["harbor", "midtown", "old_quarter", "riverside"]
@@ -143,6 +157,34 @@ def _append_analyst_notes(state: InvestigationState, lines: list[str]) -> None:
     state.analyst_notes.extend(lines)
 
 
+def _mark_style(state: InvestigationState, style: str | None) -> None:
+    if not style:
+        return
+    state.style_counts[style] = state.style_counts.get(style, 0) + 1
+
+
+def _apply_operation_outcome(
+    state: InvestigationState,
+    outcome,
+    notes: list[str],
+    label: str,
+) -> None:
+    if outcome.pressure_delta:
+        state.pressure = int(
+            clamp(state.pressure + outcome.pressure_delta, 0, PRESSURE_LIMIT)
+        )
+    if outcome.trust_delta:
+        state.trust = int(clamp(state.trust + outcome.trust_delta, 0, TRUST_LIMIT))
+    if outcome.pressure_delta > 0:
+        notes.append(f"Pressure rises after the {label}.")
+    elif outcome.pressure_delta < 0:
+        notes.append(f"Pressure eases after the {label}.")
+    if outcome.trust_delta > 0:
+        notes.append("Trust improves after the operation.")
+    elif outcome.trust_delta < 0:
+        notes.append("Trust drops after the operation.")
+
+
 def _ensure_cctv_lead(state: InvestigationState, notes: list[str]) -> None:
     lead = lead_for_type(state, EvidenceType.CCTV)
     if lead is None:
@@ -195,6 +237,13 @@ def _reveal_limited(
             if len(revealed) >= limit:
                 break
     return revealed
+
+
+def _matches_location(item: EvidenceItem, location_id: UUID) -> bool:
+    item_location = getattr(item, "location_id", None)
+    if item_location is None:
+        return True
+    return item_location == location_id
 
 
 def _apply_cooperation_decay(state: InvestigationState, revealed: list[EvidenceItem]) -> list[str]:
@@ -362,6 +411,36 @@ def _dialog_statement_from_graph(
     return rendered or None
 
 
+def visit_location(
+    state: InvestigationState,
+    location_id: UUID,
+    location_name: str | None = None,
+) -> ActionResult:
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
+        state, ActionType.VISIT_LOCATION
+    )
+    if blocked:
+        return ActionResult(
+            action=ActionType.VISIT_LOCATION,
+            outcome=ActionOutcome.FAILURE,
+            summary=reason,
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    state.active_location_id = location_id
+    destination = location_name or "a new location"
+    summary = f"Travelled to {destination}."
+    return ActionResult(
+        action=ActionType.VISIT_LOCATION,
+        outcome=ActionOutcome.SUCCESS,
+        summary=summary,
+        time_cost=time_cost,
+        pressure_cost=pressure_cost,
+        cooperation_change=coop_delta,
+    )
+
+
 def visit_scene(
     truth: TruthState,
     presentation: PresentationCase,
@@ -381,6 +460,7 @@ def visit_scene(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    _mark_style(state, "analytical")
     apply_action(
         truth,
         EventKind.INVESTIGATE_SCENE,
@@ -396,7 +476,8 @@ def visit_scene(
     revealed = _reveal(
         state,
         presentation,
-        lambda item: item.poi_id == poi_id if poi_id else item.source == "Scene Unit",
+        lambda item: _matches_location(item, location_id)
+        and (item.poi_id == poi_id if poi_id else item.source == "Scene Unit"),
     )
     if revealed:
         revealed_by_type: dict[EvidenceType, list[EvidenceItem]] = {}
@@ -448,6 +529,8 @@ def interview(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    style = "coercive" if approach == InterviewApproach.PRESSURE else "social"
+    _mark_style(state, style)
     apply_action(truth, EventKind.INTERVIEW, state.time, location_id, participants=[person_id])
     notes = update_lead_statuses(state)
     interview_state = _interview_state(state, person_id, truth)
@@ -703,9 +786,7 @@ def interview(
         contradiction_id = truth.case_meta.get("contradiction_witness_id")
         force_contradiction = (
             base_window
-            and base_known
             and not interview_state.contradiction_emitted
-            and approach == InterviewApproach.PRESSURE
             and (
                 not contradiction_id
                 or str(contradiction_id) == str(person_id)
@@ -748,6 +829,7 @@ def interview(
             interview_state.phase = InterviewPhase.CONFESSION
             confidence = ConfidenceBand.STRONG
             notes.append("The witness concedes under pressure.")
+            notes.append("Confession recorded.")
 
         time_phrase = _format_time_phrase(time_window)
         template_hooks: list[str] = []
@@ -766,13 +848,26 @@ def interview(
         elif not lie_bias and truth_seen and suspect_id:
             observed_person_ids = [suspect_id]
 
-        if lie_bias and lie_type == "denial":
+        confession = interview_state.phase == InterviewPhase.CONFESSION
+        if confession:
+            if truth_seen and suspect_name:
+                statement = (
+                    f"I should have said this earlier. I saw {suspect_name} near {place} "
+                    f"{time_phrase}. I held it back because I did not want trouble."
+                )
+            else:
+                statement = (
+                    f"I should have said this earlier. I heard the disturbance near {place} "
+                    f"{time_phrase}. I kept quiet because I did not want trouble."
+                )
+            template_hooks.append("Concession under pressure.")
+        elif lie_bias and lie_type == "denial":
             statement = f"I didn't see anyone, just noise around {time_phrase}."
         else:
             statement = f"I saw {suspect_name} near {place} {time_phrase}."
-        if not truth_seen and not observed_person_ids:
+        if not truth_seen and not observed_person_ids and not confession:
             statement = f"I heard a disturbance near {place} {time_phrase}."
-        if not lie_bias:
+        if not lie_bias and not confession:
             dialog_context = {
                 "place": place,
                 "suspect": suspect_name,
@@ -784,11 +879,16 @@ def interview(
             )
             if dialog_statement:
                 statement = dialog_statement
+        if confession and truth_seen and suspect_id:
+            observed_person_ids = [suspect_id]
 
         hooks = baseline_hooks(interview_state.baseline_profile, statement, template_hooks)
+        summary = "Witness statement (follow-up)"
+        if confession:
+            summary = "Witness statement (confession)"
         evidence = WitnessStatement(
             evidence_type=EvidenceType.TESTIMONIAL,
-            summary="Witness statement (follow-up)",
+            summary=summary,
             source="Interview",
             time_collected=state.time,
             confidence=confidence,
@@ -865,6 +965,7 @@ def follow_neighbor_lead(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    _mark_style(state, "social")
     notes = update_lead_statuses(state)
     rng = Rng(truth.seed).fork(f"neighbor:{lead.slot_id}:{state.time}")
     role = _weighted_choice(rng, lead.witness_roles) or "witness"
@@ -983,6 +1084,7 @@ def request_cctv(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    _mark_style(state, "analytical")
     apply_action(
         truth,
         EventKind.REQUEST_CCTV,
@@ -991,7 +1093,12 @@ def request_cctv(
         metadata={"action": "request_cctv"},
     )
     notes = update_lead_statuses(state)
-    revealed = _reveal(state, presentation, lambda item: item.evidence_type == EvidenceType.CCTV)
+    revealed = _reveal(
+        state,
+        presentation,
+        lambda item: item.evidence_type == EvidenceType.CCTV
+        and _matches_location(item, location_id),
+    )
     lead = lead_for_type(state, EvidenceType.CCTV)
     if lead and lead.status == LeadStatus.EXPIRED and revealed:
         notes.extend(apply_lead_decay(lead, revealed))
@@ -1040,6 +1147,7 @@ def submit_forensics(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    _mark_style(state, "analytical")
     metadata = {"action": "submit_forensics"}
     if item_id:
         metadata["item_id"] = str(item_id)
@@ -1055,7 +1163,8 @@ def submit_forensics(
         state,
         presentation,
         lambda item: item.evidence_type == EvidenceType.FORENSICS
-        and item.source == "Forensics Lab",
+        and item.source == "Forensics Lab"
+        and _matches_location(item, location_id),
     )
     lead = lead_for_type(state, EvidenceType.FORENSICS)
     if lead and lead.status == LeadStatus.EXPIRED and revealed:
@@ -1094,6 +1203,7 @@ def rossmo_lite(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    _mark_style(state, "analytical")
     notes = update_lead_statuses(state)
     lines: list[str] = []
     counts = _district_counts(truth)
@@ -1144,10 +1254,18 @@ def tech_sweep(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    _mark_style(state, "analytical")
     notes = update_lead_statuses(state)
     rng = Rng(truth.seed).fork(f"tech_sweep:{state.time}")
     profiles = load_location_profiles()
-    archetype_id = truth.case_meta.get("location_archetype")
+    archetype_id = None
+    for entry in truth.case_meta.get("locations", []) or []:
+        entry_id = entry.get("location_id")
+        if entry_id and str(location_id) == str(entry_id):
+            archetype_id = entry.get("archetype_id")
+            break
+    if not archetype_id:
+        archetype_id = truth.case_meta.get("location_archetype")
     archetype = profiles["archetypes"].get(archetype_id, {}) if archetype_id else {}
     presence_curve = archetype.get("presence_curve", {}) or {}
     surveillance = archetype.get("surveillance", {}) or {}
@@ -1224,6 +1342,324 @@ def tech_sweep(
         pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
         notes=notes,
+    )
+
+
+def request_warrant(
+    truth: TruthState,
+    presentation: PresentationCase,
+    state: InvestigationState,
+    board: DeductionBoard,
+    location_id: UUID,
+    warrant_type: WarrantType,
+    evidence_ids: list[UUID] | None = None,
+) -> ActionResult:
+    if board.hypothesis is None:
+        return ActionResult(
+            action=ActionType.REQUEST_WARRANT,
+            outcome=ActionOutcome.FAILURE,
+            summary="Set a hypothesis before requesting a warrant.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
+        state, ActionType.REQUEST_WARRANT
+    )
+    if blocked:
+        return ActionResult(
+            action=ActionType.REQUEST_WARRANT,
+            outcome=ActionOutcome.FAILURE,
+            summary=reason,
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    if evidence_ids is None:
+        evidence_ids = list(board.hypothesis.evidence_ids)
+    if not evidence_ids:
+        return ActionResult(
+            action=ActionType.REQUEST_WARRANT,
+            outcome=ActionOutcome.FAILURE,
+            summary="Select supporting evidence before requesting a warrant.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    _mark_style(state, "analytical")
+    plan = OperationPlan(
+        op_type=OperationType.WARRANT,
+        warrant_type=warrant_type,
+        target_person_id=board.hypothesis.suspect_id,
+        target_location_id=location_id,
+        evidence_ids=list(evidence_ids),
+    )
+    outcome = resolve_operation(plan, presentation, board.hypothesis)
+    apply_action(
+        truth,
+        EventKind.REQUEST_WARRANT,
+        state.time,
+        location_id,
+        participants=[board.hypothesis.suspect_id],
+        metadata={"action": "request_warrant", "warrant_type": warrant_type.value},
+    )
+    notes = update_lead_statuses(state)
+    notes.extend(outcome.notes)
+    _apply_operation_outcome(state, outcome, notes, "warrant decision")
+    action_outcome = (
+        ActionOutcome.SUCCESS
+        if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}
+        else ActionOutcome.FAILURE
+    )
+    if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}:
+        state.warrant_grants.add(warrant_type.value)
+    return ActionResult(
+        action=ActionType.REQUEST_WARRANT,
+        outcome=action_outcome,
+        summary=outcome.summary,
+        time_cost=time_cost,
+        pressure_cost=pressure_cost,
+        cooperation_change=coop_delta,
+        notes=notes,
+        operation_type=OperationType.WARRANT,
+        operation_tier=outcome.tier,
+    )
+
+
+def stakeout(
+    truth: TruthState,
+    presentation: PresentationCase,
+    state: InvestigationState,
+    board: DeductionBoard,
+    location_id: UUID,
+    evidence_ids: list[UUID],
+) -> ActionResult:
+    if board.hypothesis is None:
+        return ActionResult(
+            action=ActionType.STAKEOUT,
+            outcome=ActionOutcome.FAILURE,
+            summary="Set a hypothesis before running a stakeout.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    if not evidence_ids:
+        return ActionResult(
+            action=ActionType.STAKEOUT,
+            outcome=ActionOutcome.FAILURE,
+            summary="Select supporting evidence before running a stakeout.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
+        state, ActionType.STAKEOUT
+    )
+    if blocked:
+        return ActionResult(
+            action=ActionType.STAKEOUT,
+            outcome=ActionOutcome.FAILURE,
+            summary=reason,
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    _mark_style(state, "analytical")
+    plan = OperationPlan(
+        op_type=OperationType.STAKEOUT,
+        target_person_id=board.hypothesis.suspect_id,
+        target_location_id=location_id,
+        evidence_ids=list(evidence_ids),
+    )
+    outcome = resolve_operation(plan, presentation, board.hypothesis)
+    apply_action(
+        truth,
+        EventKind.STAKEOUT,
+        state.time,
+        location_id,
+        participants=[board.hypothesis.suspect_id],
+        metadata={"action": "stakeout"},
+    )
+    notes = update_lead_statuses(state)
+    notes.extend(outcome.notes)
+    _apply_operation_outcome(state, outcome, notes, "stakeout")
+    action_outcome = (
+        ActionOutcome.SUCCESS
+        if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}
+        else ActionOutcome.FAILURE
+    )
+    return ActionResult(
+        action=ActionType.STAKEOUT,
+        outcome=action_outcome,
+        summary=outcome.summary,
+        time_cost=time_cost,
+        pressure_cost=pressure_cost,
+        cooperation_change=coop_delta,
+        notes=notes,
+        operation_type=OperationType.STAKEOUT,
+        operation_tier=outcome.tier,
+    )
+
+
+def bait(
+    truth: TruthState,
+    presentation: PresentationCase,
+    state: InvestigationState,
+    board: DeductionBoard,
+    location_id: UUID,
+    evidence_ids: list[UUID],
+) -> ActionResult:
+    if board.hypothesis is None:
+        return ActionResult(
+            action=ActionType.BAIT,
+            outcome=ActionOutcome.FAILURE,
+            summary="Set a hypothesis before running a bait operation.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    if not evidence_ids:
+        return ActionResult(
+            action=ActionType.BAIT,
+            outcome=ActionOutcome.FAILURE,
+            summary="Select supporting evidence before running bait.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
+        state, ActionType.BAIT
+    )
+    if blocked:
+        return ActionResult(
+            action=ActionType.BAIT,
+            outcome=ActionOutcome.FAILURE,
+            summary=reason,
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    _mark_style(state, "coercive")
+    plan = OperationPlan(
+        op_type=OperationType.BAIT,
+        target_person_id=board.hypothesis.suspect_id,
+        target_location_id=location_id,
+        evidence_ids=list(evidence_ids),
+    )
+    outcome = resolve_operation(plan, presentation, board.hypothesis)
+    apply_action(
+        truth,
+        EventKind.BAIT,
+        state.time,
+        location_id,
+        participants=[board.hypothesis.suspect_id],
+        metadata={"action": "bait"},
+    )
+    notes = update_lead_statuses(state)
+    notes.extend(outcome.notes)
+    _apply_operation_outcome(state, outcome, notes, "bait operation")
+    action_outcome = (
+        ActionOutcome.SUCCESS
+        if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}
+        else ActionOutcome.FAILURE
+    )
+    return ActionResult(
+        action=ActionType.BAIT,
+        outcome=action_outcome,
+        summary=outcome.summary,
+        time_cost=time_cost,
+        pressure_cost=pressure_cost,
+        cooperation_change=coop_delta,
+        notes=notes,
+        operation_type=OperationType.BAIT,
+        operation_tier=outcome.tier,
+    )
+
+
+def raid(
+    truth: TruthState,
+    presentation: PresentationCase,
+    state: InvestigationState,
+    board: DeductionBoard,
+    location_id: UUID,
+    evidence_ids: list[UUID],
+) -> ActionResult:
+    if board.hypothesis is None:
+        return ActionResult(
+            action=ActionType.RAID,
+            outcome=ActionOutcome.FAILURE,
+            summary="Set a hypothesis before running a raid.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    if not (
+        WarrantType.ARREST.value in state.warrant_grants
+        or WarrantType.SEARCH.value in state.warrant_grants
+    ):
+        return ActionResult(
+            action=ActionType.RAID,
+            outcome=ActionOutcome.FAILURE,
+            summary="Raid requires an arrest or search warrant.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    if not evidence_ids:
+        return ActionResult(
+            action=ActionType.RAID,
+            outcome=ActionOutcome.FAILURE,
+            summary="Select supporting evidence before running a raid.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
+        state, ActionType.RAID
+    )
+    if blocked:
+        return ActionResult(
+            action=ActionType.RAID,
+            outcome=ActionOutcome.FAILURE,
+            summary=reason,
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    _mark_style(state, "coercive")
+    plan = OperationPlan(
+        op_type=OperationType.RAID,
+        target_person_id=board.hypothesis.suspect_id,
+        target_location_id=location_id,
+        evidence_ids=list(evidence_ids),
+    )
+    outcome = resolve_operation(plan, presentation, board.hypothesis)
+    apply_action(
+        truth,
+        EventKind.RAID,
+        state.time,
+        location_id,
+        participants=[board.hypothesis.suspect_id],
+        metadata={"action": "raid"},
+    )
+    notes = update_lead_statuses(state)
+    notes.extend(outcome.notes)
+    _apply_operation_outcome(state, outcome, notes, "raid")
+    action_outcome = (
+        ActionOutcome.SUCCESS
+        if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}
+        else ActionOutcome.FAILURE
+    )
+    return ActionResult(
+        action=ActionType.RAID,
+        outcome=action_outcome,
+        summary=outcome.summary,
+        time_cost=time_cost,
+        pressure_cost=pressure_cost,
+        cooperation_change=coop_delta,
+        notes=notes,
+        operation_type=OperationType.RAID,
+        operation_tier=outcome.tier,
     )
 
 
@@ -1323,9 +1759,10 @@ def set_hypothesis(
             time_cost=0,
             pressure_cost=0,
             cooperation_change=0.0,
-        )
+    )
 
     notes = update_lead_statuses(state)
+    _mark_style(state, "analytical")
     board.hypothesis = Hypothesis(
         suspect_id=suspect_id,
         claims=list(dict.fromkeys(claims)),
@@ -1381,9 +1818,10 @@ def set_profile(
             time_cost=0,
             pressure_cost=0,
             cooperation_change=0.0,
-        )
+    )
 
     notes = update_lead_statuses(state)
+    _mark_style(state, "analytical")
     state.profile = OffenderProfile(
         organization=organization,
         drive=drive,

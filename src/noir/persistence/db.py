@@ -7,6 +7,7 @@ import json
 import sqlite3
 
 from noir.world.state import (
+    CampaignState,
     CaseRecord,
     DistrictStatus,
     EpisodeTitleState,
@@ -21,6 +22,7 @@ class WorldStore:
         self.path = Path(path)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
+        self._has_nemesis_activity = False
         self._ensure_schema()
 
     def close(self) -> None:
@@ -30,6 +32,7 @@ class WorldStore:
         cur = self.conn.cursor()
         for table in (
             "world_state",
+            "campaign_state",
             "episode_title_state",
             "case_history",
             "district_status",
@@ -42,7 +45,7 @@ class WorldStore:
 
     def load_world_state(self) -> WorldState:
         cur = self.conn.cursor()
-        cur.execute("SELECT trust_level, pressure_level, tick, nemesis_activity FROM world_state WHERE id = 1")
+        cur.execute("SELECT trust_level, pressure_level, tick, nemesis_exposure FROM world_state WHERE id = 1")
         row = cur.fetchone()
         if row is None:
             state = WorldState()
@@ -52,7 +55,7 @@ class WorldStore:
             trust=int(row["trust_level"]),
             pressure=int(row["pressure_level"]),
             tick=int(row["tick"]),
-            nemesis_activity=int(row["nemesis_activity"]),
+            nemesis_exposure=int(row["nemesis_exposure"]),
         )
         cur.execute("SELECT state_json FROM nemesis_state WHERE id = 1")
         row = cur.fetchone()
@@ -62,6 +65,8 @@ class WorldStore:
                 state.nemesis_state = NemesisState.from_dict(payload)
             except json.JSONDecodeError:
                 state.nemesis_state = None
+        if state.nemesis_state is not None:
+            state.nemesis_exposure = state.nemesis_state.exposure
         cur.execute("SELECT used_ids, recent_registers, recent_tags FROM episode_title_state WHERE id = 1")
         row = cur.fetchone()
         if row is not None:
@@ -70,6 +75,14 @@ class WorldStore:
                 recent_registers=json.loads(row["recent_registers"] or "[]"),
                 recent_tags=json.loads(row["recent_tags"] or "[]"),
             )
+        cur.execute("SELECT state_json FROM campaign_state WHERE id = 1")
+        row = cur.fetchone()
+        if row is not None and row["state_json"]:
+            try:
+                payload = json.loads(row["state_json"])
+                state.campaign = CampaignState.from_dict(payload)
+            except json.JSONDecodeError:
+                state.campaign = CampaignState()
         cur.execute("SELECT district, status FROM district_status")
         for entry in cur.fetchall():
             status = DistrictStatus(entry["status"])
@@ -120,18 +133,49 @@ class WorldStore:
 
     def save_world_state(self, state: WorldState) -> None:
         cur = self.conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO world_state (id, trust_level, pressure_level, tick, nemesis_activity)
-            VALUES (1, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                trust_level = excluded.trust_level,
-                pressure_level = excluded.pressure_level,
-                tick = excluded.tick,
-                nemesis_activity = excluded.nemesis_activity
-            """,
-            (state.trust, state.pressure, state.tick, state.nemesis_activity),
+        nemesis_exposure = (
+            state.nemesis_state.exposure if state.nemesis_state else state.nemesis_exposure
         )
+        if self._has_nemesis_activity:
+            cur.execute(
+                """
+                INSERT INTO world_state (
+                    id,
+                    trust_level,
+                    pressure_level,
+                    tick,
+                    nemesis_exposure,
+                    nemesis_activity
+                )
+                VALUES (1, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    trust_level = excluded.trust_level,
+                    pressure_level = excluded.pressure_level,
+                    tick = excluded.tick,
+                    nemesis_exposure = excluded.nemesis_exposure,
+                    nemesis_activity = excluded.nemesis_activity
+                """,
+                (
+                    state.trust,
+                    state.pressure,
+                    state.tick,
+                    nemesis_exposure,
+                    nemesis_exposure,
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO world_state (id, trust_level, pressure_level, tick, nemesis_exposure)
+                VALUES (1, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    trust_level = excluded.trust_level,
+                    pressure_level = excluded.pressure_level,
+                    tick = excluded.tick,
+                    nemesis_exposure = excluded.nemesis_exposure
+                """,
+                (state.trust, state.pressure, state.tick, nemesis_exposure),
+            )
         cur.execute(
             """
             INSERT INTO episode_title_state (id, used_ids, recent_registers, recent_tags)
@@ -146,6 +190,15 @@ class WorldStore:
                 json.dumps(state.episode_titles.recent_registers),
                 json.dumps(state.episode_titles.recent_tags),
             ),
+        )
+        cur.execute(
+            """
+            INSERT INTO campaign_state (id, state_json)
+            VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                state_json = excluded.state_json
+            """,
+            (json.dumps(state.campaign.to_dict()),),
         )
         cur.execute("DELETE FROM district_status")
         for district, status in state.district_status.items():
@@ -238,10 +291,25 @@ class WorldStore:
                 trust_level INTEGER NOT NULL,
                 pressure_level INTEGER NOT NULL,
                 tick INTEGER NOT NULL,
-                nemesis_activity INTEGER NOT NULL
+                nemesis_exposure INTEGER NOT NULL
             )
             """
         )
+        cur.execute("PRAGMA table_info(world_state)")
+        columns = {row["name"] for row in cur.fetchall()}
+        self._has_nemesis_activity = "nemesis_activity" in columns
+        if "nemesis_exposure" not in columns:
+            cur.execute(
+                "ALTER TABLE world_state ADD COLUMN nemesis_exposure INTEGER NOT NULL DEFAULT 0"
+            )
+            if "nemesis_activity" in columns:
+                cur.execute(
+                    "UPDATE world_state SET nemesis_exposure = nemesis_activity"
+                )
+        if self._has_nemesis_activity:
+            cur.execute(
+                "UPDATE world_state SET nemesis_activity = 0 WHERE nemesis_activity IS NULL"
+            )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS episode_title_state (
@@ -249,6 +317,14 @@ class WorldStore:
                 used_ids TEXT,
                 recent_registers TEXT,
                 recent_tags TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS campaign_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                state_json TEXT
             )
             """
         )

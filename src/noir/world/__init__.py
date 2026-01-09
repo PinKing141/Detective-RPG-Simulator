@@ -2,6 +2,7 @@
 
 from noir.world.autonomy import apply_autonomy
 from noir.world.state import (
+    CampaignState,
     CaseRecord,
     CaseStartModifiers,
     DistrictStatus,
@@ -11,6 +12,7 @@ from noir.world.state import (
 
 __all__ = [
     "apply_autonomy",
+    "CampaignState",
     "CaseRecord",
     "CaseStartModifiers",
     "DistrictStatus",

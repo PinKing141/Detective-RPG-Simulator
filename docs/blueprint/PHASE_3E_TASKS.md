@@ -64,21 +64,21 @@ This phase cannot answer:
 - Exposure regression implemented.
 ## Current implementation gaps (code audit)
 Last updated: 2026-01-08
-- Persistent nemesis profile stored between cases (identity packet + MO vector) is not implemented.
-- Adaptation cooldown, exposure regression, and escalation cap are not implemented.
-- Exposure meter is not tracked separately from department Pressure.
-  - Code refs: src/noir/world/state.py, src/noir/nemesis/*
+Resolved:
+- Multi-case loop confirms adaptation cooldown, exposure regression, and escalation cap behavior.
+- Exposure persists across app restarts (world DB load/save).
+  - Code refs: src/noir/world/state.py, src/noir/nemesis/state.py, src/noir/persistence/db.py
 
 ## Exit checklist
-- [ ] Nemesis persists across at least 3 cases.
-- [ ] One method changes due to being compromised.
-- [ ] Exposure affects visibility or taunting.
-- [ ] Nemesis does not dominate all cases.
-- [ ] Adaptation respects cooldown windows.
-- [ ] Escalation never exceeds the Phase 3 ceiling.
-- [ ] Exposure can regress under low-visibility outcomes.
-- [ ] Nemesis memory affects tone, not competence.
-- [ ] No internal or UI certainty flags exist.
+- [x] Nemesis persists across at least 3 cases.
+- [x] One method changes due to being compromised.
+- [x] Exposure affects visibility or taunting.
+- [x] Nemesis does not dominate all cases.
+- [x] Adaptation respects cooldown windows.
+- [x] Escalation never exceeds the Phase 3 ceiling.
+- [x] Exposure can regress under low-visibility outcomes.
+- [x] Nemesis memory affects tone, not competence.
+- [x] No internal or UI certainty flags exist.
 
 Stop condition:
 If the offender feels persistent without taking over the game, stop.

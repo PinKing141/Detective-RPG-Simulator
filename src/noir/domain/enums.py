@@ -27,6 +27,10 @@ class EventKind(StrEnum):
     INVESTIGATE_SCENE = "investigate_scene"
     REQUEST_CCTV = "request_cctv"
     SUBMIT_FORENSICS = "submit_forensics"
+    REQUEST_WARRANT = "request_warrant"
+    STAKEOUT = "stakeout"
+    BAIT = "bait"
+    RAID = "raid"
     ARREST = "arrest"
 
 

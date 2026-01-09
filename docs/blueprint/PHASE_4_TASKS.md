@@ -13,8 +13,12 @@ Phase 4 is not:
 Phase 4 only reads systems. It does not add new mechanics.
 
 Prerequisites:
+- Phase 3C establishes episode titles + recap framing (Phase 4 uses it; no new UI panels).
 - Phase 3D establishes signature patterns and a tracker.
-- Phase 3E establishes a persistent offender with light adaptation.
+- Phase 3E establishes a persistent offender with light adaptation + nemesis_exposure.
+- Phase 3F establishes multi-site cases and location visits (Phase 4 schedules, not invents).
+- Phase 3G establishes the Unsub profile board (Phase 4 consumes it for closing-in).
+- Phase 3H establishes analyst tools (Rossmo-lite + tech sweep) as inputs, not new systems.
 
 Nemesis scope rules:
 - Exactly one adaptive Nemesis at a time.
@@ -58,7 +62,7 @@ Phase 4 synthesizes patterns from:
 
 No new mechanics. No new meters shown to the player.
 
-### D) Nemesis resolution (optional)
+### D) Nemesis resolution
 Capture, exposure, disappearance, retirement, unresolved pursuit are all valid.
 The nemesis never defines the ending. The player's approach does.
 
@@ -69,9 +73,9 @@ The nemesis never defines the ending. The player's approach does.
 - Moral judgment labels
 
 ## 3) Phase 4 deliverables (artifacts you should point to)
-- Campaign state model (season progress, pressure, trust, arc flags).
-- Case queue and pacing rules (tension wave).
-- Nemesis arc controller (closing-in logic).
+- Campaign state model (season progress, pressure, trust, nemesis_exposure, closing-in counters).
+- Case queue and pacing rules (tension wave, multi-site scheduling).
+- Nemesis arc controller (closing-in logic fed by 3G/3H outputs).
 - Detective identity metrics (DIM) and counterplay rules.
 - Endings system (early + final endings).
 - Epilogue generator (identity-based summary).
@@ -119,7 +123,8 @@ Core variables (minimal):
 - pressure
 - trust
 - clearance_rate (optional)
-- nemesis_progress and nemesis_risk
+- nemesis_exposure (reuse Phase 3E; do not add a duplicate meter)
+- closing_in counters (pattern, narrowing, proof)
 
 Pacing rule:
 Maintain a tension wave (spike, relief, spike, endgame).
@@ -131,6 +136,8 @@ Closing-in requirements (three distinct types):
 - Pattern confidence (signature recognition strength).
 - Narrowing (suspect space, zones, victim type, access).
 - Proof threshold (actionable without coin-flip).
+
+Rule: these are fed by Phase 3G/3H outputs. Phase 4 must not introduce new profiling logic.
 
 Endgame trigger:
 Unlock one operation style for v1 (pick one):
@@ -315,25 +322,25 @@ Template:
 5) Closing line
 
 ## 12) Phase 4 ordered task list
-1. CampaignState model (season progress, pressure/trust, nemesis flags).
-2. Case queue and pacing (tension wave scheduling).
-3. Nemesis closing-in progress (pattern, narrowing, proof).
-4. DIM counters and nemesis counterplay traits.
-5. Operations framework (warrant, stakeout, bait, raid).
-6. Endgame operation (pick one style first, add others as wrappers).
-7. Ending triggers + epilogue generator (early + final).
-8. Save/load covers campaign + ending state.
-9. Optional crime family expansion (if needed).
+- [x] 1) CampaignState model (season progress, pressure/trust, nemesis flags).
+- [x] 2) Case queue and pacing (tension wave scheduling).
+- [x] 3) Nemesis closing-in progress (pattern, narrowing, proof).
+- [x] 4) DIM counters and nemesis counterplay traits.
+- [x] 5) Operations framework (warrant, stakeout, bait, raid).
+- [x] 6) Endgame operation (pick one style first, add others as wrappers).
+- [x] 7) Ending triggers + epilogue generator (early + final).
+- [x] 8) Save/load covers campaign + ending state.
+- [ ] 9) Optional crime family expansion (if needed).
 
 ## 13) Phase 4 exit checklist (hard gate)
-- [ ] Same seed yields different endings for different playstyles.
-- [ ] Early endings feel intentional and complete.
-- [ ] Endings describe behavior, not correctness.
-- [ ] No new mechanics were added.
-- [ ] Players can disagree about whether they won.
-- [ ] A run has a clear beginning, escalation, and endgame.
-- [ ] Uses Phase 3C framing without expansion.
-- [ ] Any ending can be explained in-world without code references.
+- [x] Same seed yields different endings for different playstyles.
+- [x] Early endings feel intentional and complete.
+- [x] Endings describe behavior, not correctness.
+- [x] No new mechanics were added.
+- [x] Players can disagree about whether they won.
+- [x] A run has a clear beginning, escalation, and endgame.
+- [x] Uses Phase 3C framing without expansion.
+- [x] Any ending can be explained in-world without code references.
 
 Final rule:
 Phase 4 is about recognition, not answers.

@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from noir.investigation.costs import ActionType
+from noir.investigation.operations import OperationTier, OperationType
 from noir.investigation.interviews import InterviewState
 from noir.presentation.evidence import EvidenceItem
 from noir.presentation.knowledge import KnowledgeState
@@ -21,6 +23,17 @@ class ActionOutcome(StrEnum):
 
 
 @dataclass
+class LocationState:
+    location_id: UUID
+    name: str
+    district: str
+    scene_pois: list[ScenePOI] = field(default_factory=list)
+    visited_poi_ids: set[str] = field(default_factory=set)
+    body_poi_id: str | None = None
+    neighbor_leads: list["NeighborLead"] = field(default_factory=list)
+
+
+@dataclass
 class InvestigationState:
     time: int = 0
     pressure: int = 0
@@ -28,6 +41,9 @@ class InvestigationState:
     cooperation: float = 1.0
     autonomy_marks: set[str] = field(default_factory=set)
     knowledge: KnowledgeState = field(default_factory=KnowledgeState)
+    style_counts: dict[str, int] = field(default_factory=dict)
+    location_states: dict[str, LocationState] = field(default_factory=dict)
+    active_location_id: UUID | None = None
     leads: list["Lead"] = field(default_factory=list)
     scene_pois: list[ScenePOI] = field(default_factory=list)
     visited_poi_ids: set[str] = field(default_factory=set)
@@ -36,6 +52,7 @@ class InvestigationState:
     neighbor_leads: list["NeighborLead"] = field(default_factory=list)
     profile: OffenderProfile | None = None
     analyst_notes: list[str] = field(default_factory=list)
+    warrant_grants: set[str] = field(default_factory=set)
 
 
 if TYPE_CHECKING:
@@ -53,3 +70,5 @@ class ActionResult:
     cooperation_change: float
     revealed: list[EvidenceItem] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    operation_type: OperationType | None = None
+    operation_tier: OperationTier | None = None

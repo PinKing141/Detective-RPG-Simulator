@@ -102,12 +102,16 @@ def _weighted_choice(rng: Rng, options: dict[str, float]) -> str | None:
 
 
 def _witness_count(presence: float, rng: Rng) -> int:
+    if presence >= 0.75:
+        if rng.random() < (presence - 0.55):
+            return 3
+        return 2
+    if presence >= 0.5:
+        return 2
     count = 1
     if presence >= 0.35 and rng.random() < presence:
-        count += 1
-    if presence >= 0.6 and rng.random() < (presence - 0.2):
-        count += 1
-    return min(count, 3)
+        count = 2
+    return count
 
 
 def _seed_pois_from_scope(scope_set: dict, zone_templates: dict, rng: Rng) -> list[str]:
@@ -144,6 +148,34 @@ def _location_pick(rng: Rng, risk_tolerance: float) -> dict:
     return rng.choice(choices)
 
 
+def _related_location_picks(rng: Rng, primary_name: str, count: int) -> list[dict]:
+    options = [option for option in LOCATION_OPTIONS if option["name"] != primary_name]
+    rng.shuffle(options)
+    return options[: max(0, count)]
+
+
+def _scene_layout_dict(scene_layout) -> dict:
+    return {
+        "archetype_id": scene_layout.archetype_id,
+        "scope_set": scene_layout.scope_set,
+        "mode": scene_layout.mode,
+        "zones": scene_layout.zones,
+        "location_key": scene_layout.location_key,
+        "pois": [
+            {
+                "poi_id": poi.poi_id,
+                "label": poi.label,
+                "zone_id": poi.zone_id,
+                "zone_label": poi.zone_label,
+                "description": poi.description,
+                "tags": list(poi.tags),
+            }
+            for poi in scene_layout.pois
+        ],
+        "neighbor_slots": scene_layout.neighbor_slots,
+    }
+
+
 def generate_case(
     rng: Rng,
     case_id: str | None = None,
@@ -158,30 +190,10 @@ def generate_case(
     risk_tolerance = round(rng.random(), 2)
     relationship_distance = rng.choice(RELATIONSHIP_DISTANCES)
 
-    location_pick = _location_pick(rng, risk_tolerance)
-
-    location_name = location_pick["name"]
     location_profiles = load_location_profiles()
-    archetype_id = location_pick["archetype"]
-    archetype = location_profiles["archetypes"].get(archetype_id, {})
-    location_tags = ["crime_scene"] + list(archetype.get("tags", []))
-    presence_curve = archetype.get("presence_curve", {}) or {}
-    witness_roles = archetype.get("witness_roles", {}) or {}
-    if archetype.get("access_level"):
-        location_tags.append(archetype["access_level"])
-    if archetype.get("surveillance", {}).get("cctv", 0) >= 0.5:
-        location_tags.append("cctv")
-    location_tags.append(f"archetype:{archetype_id}")
 
     name_rng = rng.fork("names")
     name_context = _name_context(name_rng)
-
-    crime_scene = Location(
-        name=location_name,
-        district=rng.choice(DISTRICTS),
-        tags=location_tags,
-    )
-    truth.add_location(crime_scene)
 
     case_archetype = case_archetype or CaseArchetype.BASELINE
     scene_mode = (
@@ -189,22 +201,90 @@ def generate_case(
         if case_archetype in (CaseArchetype.PATTERN, CaseArchetype.CHARACTER)
         else "top_down"
     )
-    seed_pois: list[str] | None = None
-    if scene_mode == "bottom_up":
-        scope_set = location_profiles["scope_sets"].get(archetype.get("scope_set"), {}) or {}
-        seed_pois = _seed_pois_from_scope(
-            scope_set,
-            location_profiles["zone_templates"],
-            rng.fork("seed-pois"),
+    location_pick = _location_pick(rng, risk_tolerance)
+    related_count = 1
+    if rng.random() < 0.45:
+        related_count = 2
+    related_picks = _related_location_picks(rng.fork("related-locations"), location_pick["name"], related_count)
+    related_roles = ["related", "anchor", "collateral"]
+    location_plan = [{"role": "primary", "pick": location_pick}]
+    for idx, pick in enumerate(related_picks):
+        role = related_roles[idx] if idx < len(related_roles) else "related"
+        location_plan.append({"role": role, "pick": pick})
+
+    crime_scene = None
+    primary_poi_id = None
+    body_poi_id = None
+    presence_curve: dict[str, float] = {}
+    witness_roles: dict[str, float] = {}
+    primary_scene_layout = None
+    primary_archetype_id = ""
+    location_entries: list[dict] = []
+    for idx, entry in enumerate(location_plan):
+        role = entry["role"]
+        pick = entry["pick"]
+        archetype_id = pick["archetype"]
+        archetype = location_profiles["archetypes"].get(archetype_id, {})
+        location_tags = list(archetype.get("tags", []))
+        if role == "primary":
+            location_tags.insert(0, "crime_scene")
+        else:
+            location_tags.insert(0, "related_scene")
+        if archetype.get("access_level"):
+            location_tags.append(archetype["access_level"])
+        if archetype.get("surveillance", {}).get("cctv", 0) >= 0.5:
+            location_tags.append("cctv")
+        location_tags.append(f"archetype:{archetype_id}")
+        location = Location(
+            name=pick["name"],
+            district=rng.choice(DISTRICTS),
+            tags=location_tags,
         )
-    scene_layout = build_scene_layout(
-        rng.fork("scene"),
-        archetype_id=archetype_id,
-        mode=scene_mode,
-        seed_pois=seed_pois,
-    )
-    primary_poi_id = scene_layout.pois[0].poi_id if scene_layout.pois else None
-    body_poi_id = primary_poi_id
+        truth.add_location(location)
+        location_key = "primary" if role == "primary" else f"{role}_{idx}"
+        layout_mode = scene_mode if role == "primary" else "top_down"
+        seed_pois = None
+        if layout_mode == "bottom_up":
+            scope_set = (
+                location_profiles["scope_sets"].get(archetype.get("scope_set"), {}) or {}
+            )
+            seed_pois = _seed_pois_from_scope(
+                scope_set,
+                location_profiles["zone_templates"],
+                rng.fork(f"seed-pois:{location_key}"),
+            )
+        scene_layout = build_scene_layout(
+            rng.fork(f"scene:{location_key}"),
+            archetype_id=archetype_id,
+            mode=layout_mode,
+            seed_pois=seed_pois,
+            location_key=location_key,
+        )
+        entry_primary_poi = scene_layout.pois[0].poi_id if scene_layout.pois else ""
+        entry_body_poi = entry_primary_poi if role == "primary" else ""
+        location_entries.append(
+            {
+                "location_id": str(location.id),
+                "name": location.name,
+                "district": location.district,
+                "role": role,
+                "archetype_id": archetype_id,
+                "scene_layout": _scene_layout_dict(scene_layout),
+                "primary_poi_id": entry_primary_poi,
+                "body_poi_id": entry_body_poi,
+            }
+        )
+        if role == "primary":
+            crime_scene = location
+            primary_scene_layout = scene_layout
+            primary_poi_id = entry_primary_poi or None
+            body_poi_id = entry_body_poi or None
+            presence_curve = archetype.get("presence_curve", {}) or {}
+            witness_roles = archetype.get("witness_roles", {}) or {}
+            primary_archetype_id = archetype_id
+
+    if crime_scene is None:
+        raise RuntimeError("Primary crime scene could not be generated.")
 
     returning_witness = None
     if world:
@@ -407,33 +487,22 @@ def generate_case(
             "motive_category": motive,
             "location_name": crime_scene.name,
             "method_category": method_category,
-            "location_archetype": archetype_id,
-            "location_scope_set": scene_layout.scope_set,
+            "location_archetype": primary_archetype_id,
+            "location_scope_set": primary_scene_layout.scope_set
+            if primary_scene_layout
+            else "",
             "case_archetype": case_archetype.value,
             "witness_ids": [str(scene_witness.id) for scene_witness in witnesses],
             "contradiction_witness_id": str(contradiction_witness.id)
             if contradiction_witness
             else "",
-            "scene_layout": {
-                "archetype_id": scene_layout.archetype_id,
-                "scope_set": scene_layout.scope_set,
-                "mode": scene_layout.mode,
-                "zones": scene_layout.zones,
-                "pois": [
-                    {
-                        "poi_id": poi.poi_id,
-                        "label": poi.label,
-                        "zone_id": poi.zone_id,
-                        "zone_label": poi.zone_label,
-                        "description": poi.description,
-                        "tags": list(poi.tags),
-                    }
-                    for poi in scene_layout.pois
-                ],
-                "neighbor_slots": scene_layout.neighbor_slots,
-            },
+            "scene_layout": _scene_layout_dict(primary_scene_layout)
+            if primary_scene_layout
+            else {},
             "primary_poi_id": primary_poi_id,
             "body_poi_id": body_poi_id,
+            "locations": location_entries,
+            "primary_location_id": str(crime_scene.id),
             "nemesis_case": bool(nemesis_plan and nemesis_plan.is_nemesis_case),
             "nemesis_method": method_category_override or "",
             "nemesis_visibility": nemesis_visibility,
@@ -446,6 +515,7 @@ def generate_case(
         "case_id": case_id,
         "crime_time": crime_time,
         "crime_scene_id": crime_scene.id,
+        "primary_location_id": crime_scene.id,
         "victim_id": victim.id,
         "offender_id": offender.id,
         "witness_id": witness.id,
@@ -453,12 +523,26 @@ def generate_case(
         "weapon_id": weapon.id,
         "case_archetype": case_archetype.value,
         "scene_layout": truth.case_meta.get("scene_layout"),
+        "locations": [
+            {
+                "location_id": UUID(entry["location_id"]),
+                "name": entry["name"],
+                "district": entry["district"],
+                "role": entry["role"],
+                "archetype_id": entry["archetype_id"],
+                "scene_layout": entry["scene_layout"],
+                "primary_poi_id": entry["primary_poi_id"],
+                "body_poi_id": entry["body_poi_id"],
+            }
+            for entry in location_entries
+        ],
         "primary_poi_id": primary_poi_id or "",
         "body_poi_id": body_poi_id or "",
         "contradiction_witness_id": contradiction_witness.id
         if contradiction_witness
         else "",
         "nemesis_case": truth.case_meta.get("nemesis_case", False),
+        "nemesis_method": truth.case_meta.get("nemesis_method", ""),
         "nemesis_visibility": truth.case_meta.get("nemesis_visibility", 1),
         "nemesis_degraded": truth.case_meta.get("nemesis_degraded", False),
     }

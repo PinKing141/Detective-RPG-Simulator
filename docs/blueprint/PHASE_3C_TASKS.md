@@ -54,8 +54,7 @@ Phase 3C is not:
 - Optional partner/witness recurring lines (presentation only).
 ## Current implementation gaps (code audit)
 Last updated: 2026-01-08
-- Resolved: Post-arrest vignette is stored in world history for recaps.
-  - Code refs: src/noir/ui/app.py, scripts/run_game.py, src/noir/world/state.py
+- None observed.
 
 ## Exit checklist
 - [x] Same case reads differently under two gazes, with no evidence changes.

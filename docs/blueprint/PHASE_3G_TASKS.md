@@ -49,16 +49,17 @@ Phase 3G is not:
 - Profile summaries are legible and non-judgmental.
 ## Current implementation gaps (code audit)
 Last updated: 2026-01-08
-- Profile board UI/action is not implemented (no set_profile flow).
+Resolved:
+- Profile board UI/action implemented (set_profile flow wired in CLI/TUI).
   - Code refs: src/noir/ui/app.py, src/noir/investigation/actions.py
-- No profile state model or persistence yet.
-  - Code refs: src/noir/investigation/results.py, src/noir/world/state.py
+- Profile state model implemented on InvestigationState (per-case scope).
+  - Code refs: src/noir/investigation/results.py, src/noir/profiling/profile.py
 
 ## Exit checklist
-- [ ] Players can set and revise a profile.
-- [ ] Profile uses only evidence already known.
-- [ ] Profile never alters arrest validation.
-- [ ] Profile language frames uncertainty, not certainty.
+- [x] Players can set and revise a profile.
+- [x] Profile uses only evidence already known.
+- [x] Profile never alters arrest validation.
+- [x] Profile language frames uncertainty, not certainty.
 
 Stop condition:
 If profiles feel useful without becoming answers, stop.

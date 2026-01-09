@@ -1,10 +1,11 @@
-"""World state and continuity helpers for Phase 3."""
+"""World state and continuity helpers for Phase 3+."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from noir.cases.archetypes import CaseArchetype
 from noir.investigation.costs import PRESSURE_LIMIT, clamp
 from noir.nemesis.state import NemesisState
 from noir.investigation.outcomes import ArrestResult, CaseOutcome, TRUST_LIMIT
@@ -15,6 +16,13 @@ class DistrictStatus(StrEnum):
     CALM = "calm"
     TENSE = "tense"
     VOLATILE = "volatile"
+
+
+class EndgameState(StrEnum):
+    INACTIVE = "inactive"
+    READY = "ready"
+    ACTIVE = "active"
+    RESOLVED = "resolved"
 
 
 @dataclass(frozen=True)
@@ -44,6 +52,99 @@ class EpisodeTitleState:
     recent_tags: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ClosingInState:
+    pattern: int = 0
+    narrowing: int = 0
+    proof: int = 0
+
+
+@dataclass
+class DetectiveIdentityState:
+    coercive: int = 0
+    analytical: int = 0
+    social: int = 0
+    risky: int = 0
+    dominant: str | None = None
+    dominant_streak: int = 0
+
+
+@dataclass
+class CampaignState:
+    season_index: int = 1
+    episode_index: int = 1
+    case_queue: list[dict[str, str]] = field(default_factory=list)
+    closing_in: ClosingInState = field(default_factory=ClosingInState)
+    identity: DetectiveIdentityState = field(default_factory=DetectiveIdentityState)
+    ending_flags: list[str] = field(default_factory=list)
+    endgame_state: EndgameState = EndgameState.INACTIVE
+    endgame_result: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "season_index": self.season_index,
+            "episode_index": self.episode_index,
+            "case_queue": list(self.case_queue),
+            "closing_in": {
+                "pattern": self.closing_in.pattern,
+                "narrowing": self.closing_in.narrowing,
+                "proof": self.closing_in.proof,
+            },
+            "identity": {
+                "coercive": self.identity.coercive,
+                "analytical": self.identity.analytical,
+                "social": self.identity.social,
+                "risky": self.identity.risky,
+                "dominant": self.identity.dominant,
+                "dominant_streak": self.identity.dominant_streak,
+            },
+            "ending_flags": list(self.ending_flags),
+            "endgame_state": self.endgame_state.value,
+            "endgame_result": self.endgame_result,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "CampaignState":
+        closing = payload.get("closing_in", {}) or {}
+        closing_in = ClosingInState(
+            pattern=int(closing.get("pattern", 0)),
+            narrowing=int(closing.get("narrowing", 0)),
+            proof=int(closing.get("proof", 0)),
+        )
+        identity_payload = payload.get("identity", {}) or {}
+        identity = DetectiveIdentityState(
+            coercive=int(identity_payload.get("coercive", 0)),
+            analytical=int(identity_payload.get("analytical", 0)),
+            social=int(identity_payload.get("social", 0)),
+            risky=int(identity_payload.get("risky", 0)),
+            dominant=identity_payload.get("dominant"),
+            dominant_streak=int(identity_payload.get("dominant_streak", 0)),
+        )
+        return cls(
+            season_index=int(payload.get("season_index", 1)),
+            episode_index=int(payload.get("episode_index", 1)),
+            case_queue=list(payload.get("case_queue", []) or []),
+            closing_in=closing_in,
+            identity=identity,
+            ending_flags=list(payload.get("ending_flags", []) or []),
+            endgame_state=EndgameState(payload.get("endgame_state", EndgameState.INACTIVE.value)),
+            endgame_result=payload.get("endgame_result"),
+        )
+
+
+_TENSION_WAVE = [
+    CaseArchetype.CHARACTER,
+    CaseArchetype.BASELINE,
+    CaseArchetype.PRESSURE,
+    CaseArchetype.FORESHADOWING,
+    CaseArchetype.PATTERN,
+]
+
+_ENDGAME_PATTERN_MIN = 2
+_ENDGAME_NARROWING_MIN = 2
+_ENDGAME_PROOF_MIN = 1
+
+
 @dataclass(frozen=True)
 class PersonRecord:
     person_id: str
@@ -62,7 +163,7 @@ class PersonRecord:
 class WorldState:
     trust: int = 3
     pressure: int = 0
-    nemesis_activity: int = 0
+    nemesis_exposure: int = 0
     nemesis_state: NemesisState | None = None
     tick: int = 0
     district_status: dict[str, DistrictStatus] = field(default_factory=dict)
@@ -70,6 +171,7 @@ class WorldState:
     case_history: list[CaseRecord] = field(default_factory=list)
     people_index: dict[str, PersonRecord] = field(default_factory=dict)
     episode_titles: EpisodeTitleState = field(default_factory=EpisodeTitleState)
+    campaign: CampaignState = field(default_factory=CampaignState)
 
     def district_status_for(self, district: str) -> DistrictStatus:
         if district in self.district_status:
@@ -143,6 +245,132 @@ class WorldState:
             lead_deadline_delta=lead_deadline_delta,
             briefing_lines=briefing_lines,
         )
+
+    def advance_episode(self) -> None:
+        self.campaign.episode_index = max(1, self.campaign.episode_index + 1)
+
+    def ensure_case_queue(self, target_size: int = 1) -> None:
+        while len(self.campaign.case_queue) < target_size:
+            self.campaign.case_queue.append(self._schedule_case_payload())
+
+    def pop_next_case(self) -> dict[str, str] | None:
+        if not self.campaign.case_queue:
+            self.ensure_case_queue()
+        if not self.campaign.case_queue:
+            return None
+        return self.campaign.case_queue.pop(0)
+
+    def update_closing_in(
+        self,
+        pattern_type: str | None,
+        profile_used: bool,
+        proof_met: bool,
+    ) -> None:
+        if pattern_type == "signature":
+            self.campaign.closing_in.pattern += 1
+        if profile_used:
+            self.campaign.closing_in.narrowing += 1
+        if proof_met:
+            self.campaign.closing_in.proof += 1
+        self._check_endgame_trigger()
+
+    def endgame_ready(self) -> bool:
+        return self.campaign.endgame_state in {EndgameState.READY, EndgameState.ACTIVE}
+
+    def activate_endgame(self) -> None:
+        if self.campaign.endgame_state == EndgameState.READY:
+            self.campaign.endgame_state = EndgameState.ACTIVE
+
+    def resolve_endgame(self, result: str) -> None:
+        self.campaign.endgame_state = EndgameState.RESOLVED
+        self.campaign.endgame_result = result
+
+    def _check_endgame_trigger(self) -> None:
+        if self.campaign.endgame_state != EndgameState.INACTIVE:
+            return
+        closing = self.campaign.closing_in
+        if (
+            closing.pattern >= _ENDGAME_PATTERN_MIN
+            and closing.narrowing >= _ENDGAME_NARROWING_MIN
+            and closing.proof >= _ENDGAME_PROOF_MIN
+        ):
+            self.campaign.endgame_state = EndgameState.READY
+
+    def update_identity(
+        self,
+        style_counts: dict[str, int],
+        risky_flag: bool,
+    ) -> list[str]:
+        identity = self.campaign.identity
+        identity.coercive += int(style_counts.get("coercive", 0))
+        identity.analytical += int(style_counts.get("analytical", 0))
+        identity.social += int(style_counts.get("social", 0))
+        if risky_flag:
+            identity.risky += 1
+
+        case_counts = {
+            "coercive": int(style_counts.get("coercive", 0)),
+            "analytical": int(style_counts.get("analytical", 0)),
+            "social": int(style_counts.get("social", 0)),
+        }
+        dominant = None
+        if case_counts:
+            max_value = max(case_counts.values())
+            if max_value > 0:
+                top = [key for key, value in case_counts.items() if value == max_value]
+                if len(top) == 1:
+                    dominant = top[0]
+        if dominant:
+            if identity.dominant == dominant:
+                identity.dominant_streak += 1
+            else:
+                identity.dominant = dominant
+                identity.dominant_streak = 1
+        else:
+            identity.dominant_streak = 0
+
+        notes: list[str] = []
+        if (
+            self.nemesis_state
+            and identity.dominant
+            and identity.dominant_streak >= 2
+        ):
+            counterplay_map = {
+                "coercive": "aggression_feeder",
+                "analytical": "forensic_countermeasures",
+                "social": "rapport_resistant",
+            }
+            note_map = {
+                "coercive": "Pattern file suggests the offender adapts to pressure tactics.",
+                "analytical": "Pattern file notes increased forensic countermeasures.",
+                "social": "Pattern file notes growing resistance to rapport tactics.",
+            }
+            trait = counterplay_map.get(identity.dominant)
+            if trait and trait not in self.nemesis_state.profile.counterplay_traits:
+                self.nemesis_state.profile.counterplay_traits.append(trait)
+                note = note_map.get(identity.dominant)
+                if note:
+                    notes.append(note)
+        return notes
+
+    def _schedule_case_payload(self) -> dict[str, str]:
+        archetype = self._tension_wave_archetype()
+        reason = "tension_wave"
+        last_record = self.case_history[-1] if self.case_history else None
+        if last_record and last_record.outcome == ArrestResult.FAILED.value:
+            archetype = CaseArchetype.CHARACTER
+            reason = "cooldown_after_failure"
+        elif self.pressure >= 4:
+            archetype = CaseArchetype.CHARACTER
+            reason = "cooldown_pressure"
+        elif self.pressure <= 1 and archetype == CaseArchetype.CHARACTER:
+            archetype = CaseArchetype.PRESSURE
+            reason = "pressure_spike"
+        return {"archetype": archetype.value, "reason": reason}
+
+    def _tension_wave_archetype(self) -> CaseArchetype:
+        index = (self.campaign.episode_index - 1) % len(_TENSION_WAVE)
+        return _TENSION_WAVE[index]
 
     def context_lines(self, district: str, location_name: str) -> list[str]:
         status = self.district_status_for(district)

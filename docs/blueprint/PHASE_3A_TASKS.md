@@ -70,20 +70,15 @@ Decision rule:
 - LocationProfile scope sets are used to surface optional neighbor leads.
 ## Current implementation gaps (code audit)
 Last updated: 2026-01-08
-- Neighbor leads are displayed but not actionable (no follow-up action).
-  - Code refs: src/noir/investigation/leads.py, src/noir/ui/app.py
-- POIs only yield forensics; no testimonial/digital evidence from scene POIs.
-  - Code refs: src/noir/presentation/projector.py, src/noir/investigation/actions.py
-- Only one witness per case; presence curves only affect confidence.
-  - Code refs: src/noir/presentation/projector.py, src/noir/cases/truth_generator.py
+- None observed.
 
 ## Exit checklist
-- [ ] Each scene has 3 to 5 POIs with time/pressure costs.
-- [ ] POIs produce evidence with confidence and uncertainty.
-- [ ] TOD is expressed as a window, never a point.
-- [ ] Wound class appears as observation, not conclusion.
-- [ ] At least two POI paths yield different evidence mixes.
-- [ ] No new evidence classes were introduced.
+- [x] Each scene has 3 to 5 POIs with time/pressure costs.
+- [x] POIs produce evidence with confidence and uncertainty.
+- [x] TOD is expressed as a window, never a point.
+- [x] Wound class appears as observation, not conclusion.
+- [x] At least two POI paths yield different evidence mixes.
+- [x] No new evidence classes were introduced.
 
 Stop condition:
 If scenes feel investigatory and still uncertain, stop.

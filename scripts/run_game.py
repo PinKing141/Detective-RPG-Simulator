@@ -17,17 +17,23 @@ from noir.deduction.validation import validate_hypothesis
 from noir.domain.enums import EvidenceType, RoleTag
 from noir.investigation.actions import (
     arrest,
+    bait,
     follow_neighbor_lead,
     interview,
+    raid,
     rossmo_lite,
+    request_warrant,
     request_cctv,
     set_profile,
     set_hypothesis,
+    stakeout,
     submit_forensics,
     tech_sweep,
+    visit_location,
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
+from noir.investigation.operations import OperationTier, OperationType, WarrantType
 from noir.investigation.dialog_graph import load_default_interview_graph
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
 from noir.investigation.leads import (
@@ -37,7 +43,7 @@ from noir.investigation.leads import (
     format_neighbor_lead,
 )
 from noir.investigation.outcomes import TRUST_LIMIT, resolve_case_outcome
-from noir.investigation.results import ActionOutcome, InvestigationState
+from noir.investigation.results import ActionOutcome, InvestigationState, LocationState
 from noir.locations.profiles import ScenePOI
 from noir.narrative.gaze import (
     GazeMode,
@@ -54,8 +60,14 @@ from noir.narrative.recaps import (
     build_partner_line,
     build_previously_on,
 )
+from noir.narrative.endings import build_final_ending, check_early_ending
 from noir.narrative.debriefs import build_post_arrest_statement
-from noir.nemesis import PatternTracker
+from noir.nemesis import (
+    PatternTracker,
+    apply_nemesis_case_outcome,
+    create_nemesis_state,
+    plan_nemesis_case,
+)
 from noir.presentation.evidence import (
     CCTVReport,
     ForensicObservation,
@@ -74,7 +86,7 @@ from noir.util.rng import Rng
 from noir.util.grammar import normalize_line
 from noir.persistence.db import WorldStore
 from noir.world.autonomy import apply_autonomy
-from noir.world.state import CaseStartModifiers, PersonRecord, WorldState
+from noir.world.state import CaseStartModifiers, EndgameState, PersonRecord, WorldState
 
 
 def _choose_enum(enum_type, label_func=None):
@@ -89,6 +101,19 @@ def _choose_enum(enum_type, label_func=None):
     if index < 0 or index >= len(values):
         return None
     return values[index]
+
+
+def _parse_case_archetype(
+    value: str | CaseArchetype | None,
+) -> CaseArchetype | None:
+    if isinstance(value, CaseArchetype):
+        return value
+    if not value:
+        return None
+    for archetype in CaseArchetype:
+        if archetype.value == value:
+            return archetype
+    return None
 
 
 def _choose_claims() -> list[ClaimType]:
@@ -182,6 +207,17 @@ def _choose_profile_mobility() -> ProfileMobility | None:
     }
     print("Choose mobility model:")
     return _choose_enum(ProfileMobility, lambda value: labels.get(value, value.value))
+
+
+def _choose_warrant_type() -> WarrantType | None:
+    labels = {
+        WarrantType.SEARCH: "Search warrant (property)",
+        WarrantType.ARREST: "Arrest warrant (person)",
+        WarrantType.DIGITAL: "Digital records warrant",
+        WarrantType.SURVEILLANCE: "Surveillance authorization",
+    }
+    print("Choose warrant type:")
+    return _choose_enum(WarrantType, lambda value: labels.get(value, value.value))
 
 
 def _choose_dialog_choice(state: InvestigationState, witness_id) -> int | None:
@@ -298,6 +334,50 @@ def _choose_neighbor_lead(state: InvestigationState):
         return None
     return state.neighbor_leads[index]
 
+
+def _location_state_from_entry(entry: dict) -> LocationState:
+    scene_layout = entry.get("scene_layout") or {}
+    poi_rows = scene_layout.get("pois", []) or []
+    scene_pois = [ScenePOI(**row) for row in poi_rows if isinstance(row, dict)]
+    body_poi_id = entry.get("body_poi_id") or entry.get("primary_poi_id") or None
+    return LocationState(
+        location_id=entry["location_id"],
+        name=entry.get("name", "unknown"),
+        district=entry.get("district", "unknown"),
+        scene_pois=scene_pois,
+        visited_poi_ids=set(),
+        body_poi_id=body_poi_id,
+        neighbor_leads=build_neighbor_leads(scene_layout),
+    )
+
+
+def _apply_location_state(state: InvestigationState, location_state: LocationState) -> None:
+    state.scene_pois = location_state.scene_pois
+    state.visited_poi_ids = location_state.visited_poi_ids
+    state.body_poi_id = location_state.body_poi_id
+    state.neighbor_leads = location_state.neighbor_leads
+    state.active_location_id = location_state.location_id
+
+
+def _choose_location(state: InvestigationState) -> LocationState | None:
+    locations = [
+        loc
+        for loc in state.location_states.values()
+        if loc.location_id != state.active_location_id
+    ]
+    if not locations:
+        return None
+    print("Choose a location to visit:")
+    for idx, loc in enumerate(locations, start=1):
+        print(f"{idx}) {loc.name} ({loc.district})")
+    choice = input("> ").strip()
+    if not choice.isdigit():
+        return None
+    index = int(choice) - 1
+    if index < 0 or index >= len(locations):
+        return None
+    return locations[index]
+
 def _primary_role_tag(role_tags: list[RoleTag]) -> str:
     if RoleTag.WITNESS in role_tags:
         return RoleTag.WITNESS.value
@@ -362,6 +442,36 @@ def _format_confidence(confidence) -> str:
     value = confidence.value if hasattr(confidence, "value") else str(confidence)
     mapping = {"strong": "High", "medium": "Medium", "weak": "Low"}
     return mapping.get(value, value.capitalize())
+
+
+def _ensure_nemesis_state(world: WorldState, rng: Rng) -> None:
+    if world.nemesis_state is None:
+        world.nemesis_state = create_nemesis_state(rng)
+
+
+def _nemesis_briefing_lines(world: WorldState, case_facts: dict) -> list[str]:
+    state = world.nemesis_state
+    if state is None or not case_facts.get("nemesis_case"):
+        return []
+    lines: list[str] = []
+    if state.exposure >= 3:
+        lines.append("Pattern exposure is rising; expect visibility.")
+    elif state.exposure >= 1:
+        lines.append("Pattern exposure is building; stay alert.")
+    if state.profile.failure_echo:
+        lines.append(f"Tone feels {state.profile.failure_echo} in the file.")
+    return lines
+
+
+def _nemesis_method_compromised(presentation, state: InvestigationState) -> bool:
+    for item in presentation.evidence:
+        if item.id not in state.knowledge.known_evidence:
+            continue
+        if isinstance(item, ForensicsResult):
+            confidence = item.confidence.value if hasattr(item.confidence, "value") else str(item.confidence)
+            if confidence in {"medium", "strong"}:
+                return True
+    return False
 
 
 def _print_lines(lines: list[str], prefix: str = "") -> None:
@@ -565,6 +675,7 @@ def _print_episode_intro(
     location_name: str,
     district: str,
     show_previously: bool,
+    episode_index: int,
     world: WorldState,
     case_archetype: str | None = None,
 ) -> None:
@@ -572,7 +683,12 @@ def _print_episode_intro(
         recap_lines = build_previously_on(world)
         for line in recap_lines:
             print(line)
-    episode_kind = "copycat" if case_archetype == CaseArchetype.PATTERN.value else "normal"
+    if world.endgame_ready():
+        episode_kind = "nemesis"
+    else:
+        episode_kind = (
+            "copycat" if case_archetype == CaseArchetype.PATTERN.value else "normal"
+        )
     tag_map = {
         CaseArchetype.PRESSURE.value: ["pressure", "escalation"],
         CaseArchetype.PATTERN.value: ["recurrence", "copycat"],
@@ -580,6 +696,8 @@ def _print_episode_intro(
         CaseArchetype.FORESHADOWING.value: ["recurrence", "escalation"],
     }
     case_tags = tag_map.get(case_archetype, [])
+    if episode_kind == "nemesis":
+        case_tags = list(dict.fromkeys(case_tags + ["recurrence", "reckoning"]))
     episode_title = build_episode_title(
         episode_rng,
         location_name,
@@ -588,7 +706,8 @@ def _print_episode_intro(
         case_tags=case_tags,
         title_state=world.episode_titles,
     )
-    print(f"Episode: {episode_title}")
+    episode_code = f"S{world.campaign.season_index}E{episode_index}"
+    print(f"Episode: {episode_code} - {episode_title}")
     cold_open = build_cold_open(episode_rng, location_name)
     for line in cold_open:
         print(line)
@@ -607,8 +726,15 @@ def _start_case(
 ):
     case_rng = base_rng.fork(f"case-{case_index}")
     case_id = case_id_override or f"case_{seed}_{case_index}"
+    nemesis_plan = None
+    if world.nemesis_state is not None:
+        nemesis_plan = plan_nemesis_case(world.nemesis_state, case_rng.fork("nemesis-plan"))
     truth, case_facts = generate_case(
-        case_rng, case_id=case_id, world=world, case_archetype=case_archetype
+        case_rng,
+        case_id=case_id,
+        world=world,
+        case_archetype=case_archetype,
+        nemesis_plan=nemesis_plan,
     )
     if pattern_tracker:
         pattern_plan = pattern_tracker.plan_case(case_id, case_index)
@@ -629,13 +755,44 @@ def _start_case(
         start_time=next_state.time,
         deadline_delta=modifiers.lead_deadline_delta,
     )
-    scene_layout = case_facts.get("scene_layout") or {}
-    poi_rows = scene_layout.get("pois", []) or []
-    next_state.scene_pois = [ScenePOI(**row) for row in poi_rows if isinstance(row, dict)]
-    body_poi_id = case_facts.get("body_poi_id") or case_facts.get("primary_poi_id")
-    next_state.body_poi_id = body_poi_id or None
-    next_state.neighbor_leads = build_neighbor_leads(scene_layout)
+    location_entries = case_facts.get("locations") or []
+    if not location_entries:
+        location_entries = [
+            {
+                "location_id": case_facts["crime_scene_id"],
+                "name": location_name,
+                "district": district,
+                "role": "primary",
+                "scene_layout": case_facts.get("scene_layout") or {},
+                "primary_poi_id": case_facts.get("primary_poi_id") or "",
+                "body_poi_id": case_facts.get("body_poi_id") or "",
+            }
+        ]
+    primary_location_id = case_facts.get("primary_location_id") or case_facts["crime_scene_id"]
+    primary_entry = None
+    for entry in location_entries:
+        if entry.get("location_id") == primary_location_id or entry.get("role") == "primary":
+            primary_entry = entry
+            break
+    if primary_entry is None:
+        primary_entry = location_entries[0]
+    primary_state = _location_state_from_entry(primary_entry)
+    next_state.location_states[str(primary_state.location_id)] = primary_state
+    for entry in location_entries:
+        if entry is primary_entry:
+            continue
+        related_state = _location_state_from_entry(entry)
+        next_state.location_states[str(related_state.location_id)] = related_state
+        break
+    _apply_location_state(next_state, primary_state)
     _sync_people(world, truth, case_id, world.tick)
+    nemesis_lines = _nemesis_briefing_lines(world, case_facts)
+    if nemesis_lines:
+        modifiers = CaseStartModifiers(
+            cooperation=modifiers.cooperation,
+            lead_deadline_delta=modifiers.lead_deadline_delta,
+            briefing_lines=modifiers.briefing_lines + nemesis_lines,
+        )
     if has_returning:
         modifiers = CaseStartModifiers(
             cooperation=modifiers.cooperation,
@@ -689,6 +846,8 @@ def _run_smoke(seed: int, case_id: str | None, case_archetype: CaseArchetype | N
         case_id_override=case_id,
         case_archetype=case_archetype,
     )
+    if state.active_location_id:
+        location_id = state.active_location_id
     print(f"[smoke] Case {truth.case_id} started.")
     witness = next(
         (p for p in truth.people.values() if RoleTag.WITNESS in p.role_tags), None
@@ -821,11 +980,21 @@ def main() -> None:
         world = world_store.load_world_state()
 
     base_rng = Rng(args.seed)
+    _ensure_nemesis_state(world, base_rng.fork("nemesis-init"))
+    if world_store:
+        world_store.save_world_state(world)
     pattern_tracker = PatternTracker.from_library(base_rng.fork("pattern"))
-    case_index = 1
+    case_index = world.campaign.episode_index
     case_start_tick = world.tick
     selected_evidence_id = None
     profile_lines: list[str] = []
+    queue_payload = None
+    queue_archetype = case_archetype
+    if case_archetype is None:
+        world.ensure_case_queue()
+        queue_payload = world.pop_next_case()
+        if queue_payload:
+            queue_archetype = _parse_case_archetype(queue_payload.get("archetype"))
     truth, presentation, state, board, location_id, item_id, district, location_name, modifiers, case_facts = _start_case(
         base_rng,
         args.seed,
@@ -833,8 +1002,21 @@ def main() -> None:
         world,
         pattern_tracker=pattern_tracker,
         case_id_override=args.case_id,
-        case_archetype=case_archetype,
+        case_archetype=queue_archetype,
     )
+    if world_store and queue_payload is not None:
+        world_store.save_world_state(world)
+    location_roster = {
+        str(entry.get("location_id")): entry
+        for entry in (case_facts.get("locations") or [])
+        if entry.get("location_id")
+    }
+    if state.active_location_id:
+        location_id = state.active_location_id
+        active_state = state.location_states.get(str(location_id))
+        if active_state:
+            location_name = active_state.name
+            district = active_state.district
 
     episode_rng = base_rng.fork(f"episode-{case_index}")
     _print_episode_intro(
@@ -842,6 +1024,7 @@ def main() -> None:
         location_name,
         district,
         show_previously=True,
+        episode_index=case_index,
         world=world,
         case_archetype=case_facts.get("case_archetype"),
     )
@@ -856,6 +1039,17 @@ def main() -> None:
             f"Trust: {state.trust}/{TRUST_LIMIT} | "
             f"Gaze: {gaze_label(gaze_mode)}"
         )
+        print(f"Location: {location_name} ({district})")
+        if len(state.location_states) > 1:
+            other_locations = [
+                loc.name
+                for loc in state.location_states.values()
+                if loc.location_id != state.active_location_id
+            ]
+            if other_locations:
+                preview = ", ".join(other_locations[:2])
+                suffix = "" if len(other_locations) <= 2 else f" (+{len(other_locations) - 2} more)"
+                print(f"Other locations: {preview}{suffix}")
         for line in _hypothesis_summary_lines(board, truth, presentation):
             print(line)
         if state.profile is None:
@@ -929,17 +1123,22 @@ def main() -> None:
                     print(f"- {normalize_line(line)}")
             if len(state.analyst_notes) > 4:
                 print("- ...")
-        print("1) Visit scene")
-        print("2) Interview witness")
-        print("3) Request CCTV")
-        print("4) Submit forensics")
-        print("5) Set hypothesis")
-        print("6) Profiling summary")
-        print("7) Arrest suspect")
-        print("8) Follow neighbor lead")
-        print("9) Set profile")
-        print("10) Analyst: Rossmo-lite")
-        print("11) Analyst: Tech sweep")
+        print("1) Visit location")
+        print("2) Visit scene")
+        print("3) Interview witness")
+        print("4) Request CCTV")
+        print("5) Submit forensics")
+        print("6) Set hypothesis")
+        print("7) Profiling summary")
+        print("8) Arrest suspect")
+        print("9) Follow neighbor lead")
+        print("10) Set profile")
+        print("11) Analyst: Rossmo-lite")
+        print("12) Analyst: Tech sweep")
+        print("13) Request warrant")
+        print("14) Stakeout")
+        print("15) Bait operation")
+        print("16) Raid")
         print("g) Toggle gaze")
         choice = input("> ").strip().lower()
         if choice == "q":
@@ -953,7 +1152,23 @@ def main() -> None:
             print(f"Gaze set to {gaze_label(gaze_mode)}.")
             continue
         result = None
+        endgame_ready = world.endgame_ready()
+        has_warrant = (
+            WarrantType.ARREST.value in state.warrant_grants
+            or WarrantType.SEARCH.value in state.warrant_grants
+        )
         if choice == "1":
+            selection = _choose_location(state)
+            if selection is None:
+                print("No other locations available.")
+                continue
+            result = visit_location(state, selection.location_id, selection.name)
+            if result.outcome == ActionOutcome.SUCCESS:
+                _apply_location_state(state, selection)
+                location_id = selection.location_id
+                location_name = selection.name
+                district = selection.district
+        elif choice == "2":
             body_poi = None
             if state.body_poi_id:
                 for poi in state.scene_pois:
@@ -995,7 +1210,7 @@ def main() -> None:
                 result.notes.append(
                     "Other scene areas remain; visit the scene again to inspect another area."
                 )
-        elif choice == "2":
+        elif choice == "3":
             selection = _choose_person(truth, RoleTag.WITNESS)
             if not selection:
                 print("No witness available.")
@@ -1021,11 +1236,11 @@ def main() -> None:
                 theme=theme,
                 dialog_choice_index=dialog_choice_index,
             )
-        elif choice == "3":
-            result = request_cctv(truth, presentation, state, location_id)
         elif choice == "4":
-            result = submit_forensics(truth, presentation, state, location_id, item_id=item_id)
+            result = request_cctv(truth, presentation, state, location_id)
         elif choice == "5":
+            result = submit_forensics(truth, presentation, state, location_id, item_id=item_id)
+        elif choice == "6":
             board.sync_from_state(state)
             selection = _choose_person(truth, RoleTag.OFFENDER)
             if not selection:
@@ -1045,7 +1260,7 @@ def main() -> None:
                 claims,
                 evidence_ids,
             )
-        elif choice == "6":
+        elif choice == "7":
             context_lines = world.context_lines(district, location_name)
             summary = build_profiling_summary(
                 presentation,
@@ -1057,7 +1272,7 @@ def main() -> None:
             for line in profile_lines:
                 print(line)
             continue
-        elif choice == "7":
+        elif choice == "8":
             if board.hypothesis is None:
                 print("Set a hypothesis before arrest.")
                 continue
@@ -1069,7 +1284,7 @@ def main() -> None:
                 location_id,
                 has_hypothesis=True,
             )
-        elif choice == "8":
+        elif choice == "9":
             lead = _choose_neighbor_lead(state)
             if lead is None:
                 print("No neighbor leads available.")
@@ -1081,7 +1296,7 @@ def main() -> None:
                 location_id,
                 lead,
             )
-        elif choice == "9":
+        elif choice == "10":
             organization = _choose_profile_org()
             if organization is None:
                 print("Invalid profile selection.")
@@ -1104,7 +1319,7 @@ def main() -> None:
                 mobility,
                 evidence_ids,
             )
-        elif choice == "10":
+        elif choice == "11":
             mobility = (
                 state.profile.mobility
                 if state.profile is not None
@@ -1116,11 +1331,110 @@ def main() -> None:
                     print("Invalid mobility selection.")
                     continue
             result = rossmo_lite(truth, state, mobility)
-        elif choice == "11":
+        elif choice == "12":
             result = tech_sweep(truth, presentation, state, location_id)
+        elif choice == "13":
+            if board.hypothesis is None:
+                print("Set a hypothesis before requesting a warrant.")
+                continue
+            warrant_type = _choose_warrant_type()
+            if warrant_type is None:
+                print("Invalid warrant selection.")
+                continue
+            board.sync_from_state(state)
+            evidence_ids = _choose_evidence(
+                truth, presentation, state, board.known_evidence_ids, gaze_mode
+            )
+            if not evidence_ids:
+                print("Select supporting evidence before requesting a warrant.")
+                continue
+            result = request_warrant(
+                truth,
+                presentation,
+                state,
+                board,
+                location_id,
+                warrant_type,
+                evidence_ids,
+            )
+        elif choice == "14":
+            if not endgame_ready:
+                print("Stakeout is not available yet.")
+                continue
+            if board.hypothesis is None:
+                print("Set a hypothesis before running a stakeout.")
+                continue
+            board.sync_from_state(state)
+            evidence_ids = _choose_evidence(
+                truth, presentation, state, board.known_evidence_ids, gaze_mode
+            )
+            if not evidence_ids:
+                print("Select supporting evidence before running a stakeout.")
+                continue
+            result = stakeout(
+                truth,
+                presentation,
+                state,
+                board,
+                location_id,
+                evidence_ids,
+            )
+        elif choice == "15":
+            if not endgame_ready:
+                print("Bait operation is not available yet.")
+                continue
+            if board.hypothesis is None:
+                print("Set a hypothesis before running a bait operation.")
+                continue
+            board.sync_from_state(state)
+            evidence_ids = _choose_evidence(
+                truth, presentation, state, board.known_evidence_ids, gaze_mode
+            )
+            if not evidence_ids:
+                print("Select supporting evidence before running bait.")
+                continue
+            result = bait(
+                truth,
+                presentation,
+                state,
+                board,
+                location_id,
+                evidence_ids,
+            )
+        elif choice == "16":
+            if not endgame_ready:
+                print("Raid is not available yet.")
+                continue
+            if board.hypothesis is None:
+                print("Set a hypothesis before running a raid.")
+                continue
+            if not has_warrant:
+                print("Raid requires an arrest or search warrant.")
+                continue
+            board.sync_from_state(state)
+            evidence_ids = _choose_evidence(
+                truth, presentation, state, board.known_evidence_ids, gaze_mode
+            )
+            if not evidence_ids:
+                print("Select supporting evidence before running a raid.")
+                continue
+            result = raid(
+                truth,
+                presentation,
+                state,
+                board,
+                location_id,
+                evidence_ids,
+            )
         else:
             print("Unknown action.")
             continue
+
+        if (
+            result.operation_type in {OperationType.STAKEOUT, OperationType.BAIT, OperationType.RAID}
+            and world.campaign.endgame_state == EndgameState.READY
+        ):
+            world.activate_endgame()
 
         autonomy_notes = apply_autonomy(state, world, district)
         if autonomy_notes:
@@ -1181,6 +1495,21 @@ def main() -> None:
                     _print_lines(lines, prefix="  ")
                 else:
                     print(f"- New evidence: {item.summary} ({item.evidence_type}, {item.confidence})")
+            for item in result.revealed:
+                location_id_value = getattr(item, "location_id", None)
+                if location_id_value is None:
+                    continue
+                key = str(location_id_value)
+                if key in state.location_states:
+                    continue
+                entry = location_roster.get(key)
+                if entry is None:
+                    continue
+                location_state = _location_state_from_entry(entry)
+                state.location_states[key] = location_state
+                result.notes.append(
+                    f"New location unlocked: {location_state.name} ({location_state.district})."
+                )
         if result.notes:
             for note in result.notes:
                 print(f"- {note}")
@@ -1188,6 +1517,26 @@ def main() -> None:
             selected_evidence_id = result.revealed[0].id
         elif selected_evidence_id is None and state.knowledge.known_evidence:
             selected_evidence_id = state.knowledge.known_evidence[0]
+
+        if result.operation_type == OperationType.RAID:
+            if result.operation_tier in {OperationTier.CLEAN, OperationTier.PARTIAL}:
+                result_key = (
+                    "captured_clean"
+                    if result.operation_tier == OperationTier.CLEAN
+                    else "captured_shaky"
+                )
+                world.resolve_endgame(result_key)
+            elif result.operation_tier == OperationTier.BURN:
+                world.resolve_endgame("raid_wrong")
+            if world.campaign.endgame_state == EndgameState.RESOLVED:
+                ending = build_final_ending(world)
+                print("")
+                print(ending.title)
+                for line in ending.lines:
+                    print(line)
+                if world_store:
+                    world_store.save_world_state(world)
+                break
 
         if result.action == ActionType.ARREST:
             board.sync_from_state(state)
@@ -1216,6 +1565,23 @@ def main() -> None:
             debrief_notes = []
             if statement_lines:
                 debrief_notes = [f"Post-arrest: {statement_lines[0]}"]
+            nemesis_notes: list[str] = []
+            if world.nemesis_state and truth.case_meta.get("nemesis_case"):
+                visibility = int(truth.case_meta.get("nemesis_visibility", 1))
+                method_compromised = _nemesis_method_compromised(presentation, state)
+                method_category = truth.case_meta.get("nemesis_method") or None
+                nemesis_notes = apply_nemesis_case_outcome(
+                    world.nemesis_state,
+                    True,
+                    visibility,
+                    outcome.arrest_result.value,
+                    method_category,
+                    method_compromised,
+                    base_rng.fork(f"nemesis-outcome-{case_index}"),
+                )
+                world.nemesis_exposure = world.nemesis_state.exposure
+            if nemesis_notes:
+                debrief_notes.extend(nemesis_notes)
             case_end_tick = case_start_tick + state.time
             world_notes = world.apply_case_outcome(
                 outcome,
@@ -1227,10 +1593,9 @@ def main() -> None:
                 case_end_tick,
                 extra_notes=debrief_notes,
             )
-            if world_store:
-                world_store.save_world_state(world)
-                world_store.record_case(world.case_history[-1])
             for note in world_notes:
+                print(f"- {note}")
+            for note in nemesis_notes:
                 print(f"- {note}")
             end_rng = base_rng.fork(f"end-{case_index}")
             for line in build_end_tag(end_rng, outcome.arrest_result.value):
@@ -1246,16 +1611,62 @@ def main() -> None:
                 print("")
                 for line in pattern_addendum.render():
                     print(line)
-            case_index += 1
+            pattern_plan = truth.case_meta.get("pattern_plan")
+            pattern_type = None
+            if isinstance(pattern_plan, dict):
+                pattern_type = pattern_plan.get("pattern_type")
+            profile_used = state.profile is not None
+            proof_met = validation.is_correct_suspect and validation.probable_cause
+            identity_notes = world.update_identity(
+                state.style_counts,
+                risky_flag=not validation.probable_cause,
+            )
+            if identity_notes:
+                debrief_notes.extend(identity_notes)
+            world.update_closing_in(pattern_type, profile_used, proof_met)
+            early = check_early_ending(world)
+            if early:
+                print("")
+                print(early.title)
+                for line in early.lines:
+                    print(line)
+                if world_store:
+                    world_store.save_world_state(world)
+                break
+            world.advance_episode()
+            case_index = world.campaign.episode_index
+            world.ensure_case_queue()
+            if world_store:
+                world_store.save_world_state(world)
+                world_store.record_case(world.case_history[-1])
             case_start_tick = world.tick
+            next_case_payload = None
+            next_case_archetype = case_archetype
+            if case_archetype is None:
+                next_case_payload = world.pop_next_case()
+                if next_case_payload:
+                    next_case_archetype = _parse_case_archetype(
+                        next_case_payload.get("archetype")
+                    )
             truth, presentation, state, board, location_id, item_id, district, location_name, modifiers, case_facts = _start_case(
                 base_rng,
                 args.seed,
                 case_index,
                 world,
                 pattern_tracker=pattern_tracker,
-                case_archetype=case_archetype,
+                case_archetype=next_case_archetype,
             )
+            location_roster = {
+                str(entry.get("location_id")): entry
+                for entry in (case_facts.get("locations") or [])
+                if entry.get("location_id")
+            }
+            if state.active_location_id:
+                location_id = state.active_location_id
+                active_state = state.location_states.get(str(location_id))
+                if active_state:
+                    location_name = active_state.name
+                    district = active_state.district
             selected_evidence_id = None
             profile_lines = []
             episode_rng = base_rng.fork(f"episode-{case_index}")
@@ -1264,6 +1675,7 @@ def main() -> None:
                 location_name,
                 district,
                 show_previously=False,
+                episode_index=case_index,
                 world=world,
                 case_archetype=case_facts.get("case_archetype"),
             )

@@ -62,21 +62,14 @@ Phase 3F is not:
 
 ## Current implementation gaps (code audit)
 Last updated: 2026-01-08
-- No case location roster or role tags exist yet; generator produces a single scene.
-  - Code refs: src/noir/cases/truth_generator.py
-- No travel/visit action or unlock flow; location_id is fixed for the whole case.
-  - Code refs: src/noir/ui/app.py, src/noir/investigation/actions.py
-- POIs and local leads are not gated by active location.
-  - Code refs: src/noir/locations/profiles.py, src/noir/presentation/projector.py
-- Evidence still originates at the primary scene only (no off-site evidence path).
-  - Code refs: src/noir/presentation/projector.py, src/noir/cases/truth_generator.py
+- (none)
 
 ## Exit checklist
-- [ ] Cases use 2 to 4 locations with clear roles.
-- [ ] Locations unlock only through leads or evidence.
-- [ ] Travel costs time/pressure and can force trade-offs.
-- [ ] At least one key evidence item is off the primary scene.
-- [ ] No map UI or open-world traversal exists.
+- [x] Cases use 2 to 4 locations with clear roles.
+- [x] Locations unlock only through leads or evidence.
+- [x] Travel costs time/pressure and can force trade-offs.
+- [x] At least one key evidence item is off the primary scene.
+- [x] No map UI or open-world traversal exists.
 
 Stop condition:
 If multi-site cases create trade-offs without sprawl, stop.

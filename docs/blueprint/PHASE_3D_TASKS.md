@@ -73,7 +73,7 @@ Red herring sources (explicit):
 Each false positive maps to one source.
 
 Case-file addendum template (mandatory):
-CASE FILE ADDENDUM — INTERNAL NOTE
+CASE FILE ADDENDUM - INTERNAL NOTE
 
 Summary:
 A detail observed in this incident resembles elements seen previously.
@@ -89,7 +89,7 @@ Action:
 Continue monitoring in future cases.
 
 Sample addendum (example):
-CASE FILE ADDENDUM — INTERNAL NOTE
+CASE FILE ADDENDUM - INTERNAL NOTE
 Status: Recurring Detail
 
 Summary:
@@ -120,10 +120,10 @@ Continue monitoring in future cases.
 - At least one false positive per 3 to 5 cases (on average).
 - Motif library maintained in docs/blueprint/NEMESIS_MOTIF_LIBRARY.md.
 - Generator-ready motifs in assets/text_atoms/nemesis_motifs.yml.
+
 ## Current implementation gaps (code audit)
 Last updated: 2026-01-08
-- Pattern addendum is not grounded in actual scene evidence (meta-driven only).
-  - Code refs: src/noir/nemesis/patterns.py, src/noir/presentation/projector.py
+None observed.
 
 ## Exit checklist
 - [x] Players notice a recurring motif without certainty.
@@ -140,3 +140,6 @@ Stop condition:
 If patterns are recognizable without certainty, stop.
 
 Status: Complete. Phase 3D delivered and locked.
+
+## Post-phase verification (non-blocking)
+- [ ] Addendum lines should reference the specific evidence item (ID/label) when available.

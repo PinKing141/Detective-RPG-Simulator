@@ -64,18 +64,15 @@ Phase 3B is not:
 - Post-arrest statement templates keyed by outcome tier (success/shaky/failed).
 ## Current implementation gaps (code audit)
 Last updated: 2026-01-08
-- Contradictions are not guaranteed per seed; they only force under pressure after baseline.
-  - Code refs: src/noir/investigation/actions.py (force_contradiction)
-- Confession phase has no distinct output format (confidence/notes only).
-  - Code refs: src/noir/investigation/actions.py, src/noir/investigation/interviews.py
+- None observed.
 
 ## Exit checklist
-- [ ] Interviews can go cold and remove leads.
-- [ ] At least two interview styles produce different evidence confidence.
-- [ ] Lies are explicit and explainable after the fact.
-- [ ] Contradictions can appear and remain unresolved.
-- [ ] No new mechanics outside the interview action.
-- [ ] Post-arrest statements are skippable and never affect outcomes.
+- [x] Interviews can go cold and remove leads.
+- [x] At least two interview styles produce different evidence confidence.
+- [x] Lies are explicit and explainable after the fact.
+- [x] Contradictions can appear and remain unresolved.
+- [x] No new mechanics outside the interview action.
+- [x] Post-arrest statements are skippable and never affect outcomes.
 
 Stop condition:
 If interviews feel risky and tradeoffs are visible, stop.

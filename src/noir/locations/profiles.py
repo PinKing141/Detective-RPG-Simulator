@@ -26,12 +26,14 @@ class SceneLayout:
     archetype_id: str
     scope_set: str | None
     mode: str
+    location_key: str | None
     zones: list[str]
     pois: list[ScenePOI]
     neighbor_slots: list[dict[str, Any]]
 
 
 _LOCATION_CACHE: dict[str, Any] | None = None
+_MIN_BOTTOM_UP_POIS = 3
 
 
 def _locations_path() -> Path:
@@ -71,8 +73,11 @@ def _poi_label(poi_name: str) -> str:
     return _format_label(poi_name)
 
 
-def _build_poi_id(zone_id: str, poi_name: str, index: int) -> str:
-    return f"{zone_id}:{poi_name}:{index}"
+def _build_poi_id(zone_id: str, poi_name: str, index: int, location_key: str | None) -> str:
+    base = f"{zone_id}:{poi_name}:{index}"
+    if location_key:
+        return f"{location_key}|{base}"
+    return base
 
 
 _POI_DESCRIPTIONS = {
@@ -178,6 +183,7 @@ def _assemble_pois(
     rng: Rng,
     zone_templates: dict[str, Any],
     zones: list[str],
+    location_key: str | None,
 ) -> list[ScenePOI]:
     pois: list[ScenePOI] = []
     used_templates: set[str] = set()
@@ -189,7 +195,7 @@ def _assemble_pois(
         rng.shuffle(poi_options)
         poi_name = poi_options[0]
         used_templates.add(f"{zone_id}:{poi_name}")
-        poi_id = _build_poi_id(zone_id, poi_name, len(pois))
+        poi_id = _build_poi_id(zone_id, poi_name, len(pois), location_key)
         tags = list(template.get("tags", []) or [])
         zone_label = _zone_label(zone_templates, zone_id)
         description = _poi_description(rng, zone_label, poi_name, tags)
@@ -213,7 +219,7 @@ def _assemble_pois(
             key = f"{zone_id}:{poi_name}"
             if key in used_templates:
                 continue
-            poi_id = _build_poi_id(zone_id, poi_name, len(candidates))
+            poi_id = _build_poi_id(zone_id, poi_name, len(candidates), location_key)
             tags = list(template.get("tags", []) or [])
             zone_label = _zone_label(zone_templates, zone_id)
             description = _poi_description(rng, zone_label, poi_name, tags)
@@ -235,11 +241,32 @@ def _assemble_pois(
     return pois[:5]
 
 
+def _merge_pois(
+    base: list[ScenePOI],
+    additions: list[ScenePOI],
+    min_count: int,
+) -> list[ScenePOI]:
+    if len(base) >= min_count:
+        return base
+    merged = list(base)
+    seen = {(poi.zone_id, poi.label.lower()) for poi in merged}
+    for poi in additions:
+        key = (poi.zone_id, poi.label.lower())
+        if key in seen:
+            continue
+        merged.append(poi)
+        seen.add(key)
+        if len(merged) >= min_count:
+            break
+    return merged
+
+
 def build_scene_layout(
     rng: Rng,
     archetype_id: str,
     mode: str = "top_down",
     seed_pois: list[str] | None = None,
+    location_key: str | None = None,
 ) -> SceneLayout:
     profiles = load_location_profiles()
     archetype = profiles["archetypes"].get(archetype_id, {})
@@ -259,7 +286,7 @@ def build_scene_layout(
             zone_id = zone_ids[0]
             if zone_id not in zones:
                 zones.append(zone_id)
-            poi_id = _build_poi_id(zone_id, poi_name, len(pois))
+            poi_id = _build_poi_id(zone_id, poi_name, len(pois), location_key)
             template = zone_templates.get(zone_id, {})
             tags = list(template.get("tags", []) or [])
             zone_label = _zone_label(zone_templates, zone_id)
@@ -276,19 +303,30 @@ def build_scene_layout(
             )
         if not zones or not pois:
             mode = "top_down"
+        elif len(pois) < _MIN_BOTTOM_UP_POIS:
+            scope_set = scope_sets.get(scope_set_id, {}) if scope_set_id else {}
+            fallback_zones = _choose_zones(rng, scope_set.get("zones", []) or [])
+            if not fallback_zones:
+                fallback_zones = _choose_zones(rng, zone_templates.keys())
+            for zone_id in zones:
+                if zone_id not in fallback_zones:
+                    fallback_zones.append(zone_id)
+            supplemental = _assemble_pois(rng, zone_templates, fallback_zones, location_key)
+            pois = _merge_pois(pois, supplemental, _MIN_BOTTOM_UP_POIS)
+            zones = list(dict.fromkeys(zones + fallback_zones))
 
     if mode == "top_down":
         scope_set = scope_sets.get(scope_set_id, {})
         neighbor_slots = list(scope_set.get("neighbor_slots", []) or [])
         zones = _choose_zones(rng, scope_set.get("zones", []) or [])
-        pois = _assemble_pois(rng, zone_templates, zones)
+        pois = _assemble_pois(rng, zone_templates, zones, location_key)
 
     if not zones:
         zones = []
     if not pois:
         poi_names = archetype.get("poi_templates", []) or []
         for poi_name in poi_names[:5]:
-            poi_id = _build_poi_id("scene", poi_name, len(pois))
+            poi_id = _build_poi_id("scene", poi_name, len(pois), location_key)
             zone_label = "Scene"
             description = _poi_description(rng, zone_label, poi_name, [])
             pois.append(
@@ -304,6 +342,7 @@ def build_scene_layout(
         archetype_id=archetype_id,
         scope_set=scope_set_id,
         mode=mode,
+        location_key=location_key,
         zones=zones,
         pois=pois,
         neighbor_slots=neighbor_slots,

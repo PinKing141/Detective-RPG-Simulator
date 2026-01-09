@@ -7,6 +7,7 @@ from enum import StrEnum
 
 
 class ActionType(StrEnum):
+    VISIT_LOCATION = "visit_location"
     VISIT_SCENE = "visit_scene"
     INTERVIEW = "interview"
     FOLLOW_NEIGHBOR = "follow_neighbor"
@@ -16,6 +17,10 @@ class ActionType(StrEnum):
     SET_PROFILE = "set_profile"
     ANALYST_ROSSMO = "analyst_rossmo"
     ANALYST_SWEEP = "analyst_sweep"
+    REQUEST_WARRANT = "request_warrant"
+    STAKEOUT = "stakeout"
+    BAIT = "bait"
+    RAID = "raid"
     ARREST = "arrest"
 
 
@@ -30,6 +35,7 @@ TIME_LIMIT = 8
 PRESSURE_LIMIT = 6
 
 COSTS = {
+    ActionType.VISIT_LOCATION: ActionCost(time=1, pressure=1),
     ActionType.VISIT_SCENE: ActionCost(time=1, pressure=0),
     ActionType.INTERVIEW: ActionCost(time=1, pressure=0, cooperation_delta=-0.05),
     ActionType.FOLLOW_NEIGHBOR: ActionCost(time=1, pressure=0, cooperation_delta=-0.05),
@@ -39,6 +45,10 @@ COSTS = {
     ActionType.SET_PROFILE: ActionCost(time=1, pressure=0),
     ActionType.ANALYST_ROSSMO: ActionCost(time=1, pressure=0),
     ActionType.ANALYST_SWEEP: ActionCost(time=1, pressure=1),
+    ActionType.REQUEST_WARRANT: ActionCost(time=1, pressure=1),
+    ActionType.STAKEOUT: ActionCost(time=2, pressure=1),
+    ActionType.BAIT: ActionCost(time=2, pressure=2),
+    ActionType.RAID: ActionCost(time=2, pressure=2),
     ActionType.ARREST: ActionCost(time=1, pressure=2),
 }
 

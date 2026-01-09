@@ -43,6 +43,7 @@ class NemesisProfile:
     comfort_zones: list[str]
     escalation_trait: str
     failure_echo: str | None = None
+    counterplay_traits: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -74,6 +75,7 @@ class NemesisState:
                 "comfort_zones": list(self.profile.comfort_zones),
                 "escalation_trait": self.profile.escalation_trait,
                 "failure_echo": self.profile.failure_echo,
+                "counterplay_traits": list(self.profile.counterplay_traits),
             },
             "mo_components": [
                 {
@@ -104,6 +106,7 @@ class NemesisState:
             comfort_zones=list(profile_data.get("comfort_zones", [])),
             escalation_trait=profile_data.get("escalation_trait", "escalate_visibility"),
             failure_echo=profile_data.get("failure_echo"),
+            counterplay_traits=list(profile_data.get("counterplay_traits", []) or []),
         )
         components: list[NemesisComponent] = []
         for entry in payload.get("mo_components", []):
@@ -218,6 +221,7 @@ def apply_nemesis_case_outcome(
     was_nemesis_case: bool,
     visibility: int,
     arrest_result: str,
+    method_category: str | None,
     method_compromised: bool,
     rng: Rng,
 ) -> list[str]:
@@ -230,9 +234,11 @@ def apply_nemesis_case_outcome(
     if arrest_result == "failed" and visibility <= 1:
         delta -= 1
     state.exposure = max(state.exposure_baseline, state.exposure + delta)
+    if delta > 0 and state.exposure > state.exposure_baseline:
+        state.exposure_baseline = max(state.exposure_baseline, state.exposure - 1)
     if method_compromised:
-        _mark_method_compromised(state)
-        notes.append("Nemesis method flagged as compromised.")
+        _mark_method_compromised(state, method_category)
+        notes.append("Pattern file notes a compromised method.")
     if arrest_result == "failed":
         state.profile.failure_echo = rng.choice(
             ["irritated", "defensive", "taunting", "quiet"]
@@ -295,12 +301,17 @@ def _select_method_component(
     return chosen, degraded
 
 
-def _mark_method_compromised(state: NemesisState) -> None:
+def _mark_method_compromised(state: NemesisState, method_category: str | None) -> None:
     methods = [
         comp for comp in state.mo_components if comp.component_type == NemesisComponentType.METHOD
     ]
     if not methods:
         return
+    if method_category:
+        for comp in methods:
+            if comp.value == method_category:
+                comp.compromised = True
+                return
     methods.sort(key=lambda comp: comp.weight, reverse=True)
     methods[0].compromised = True
 

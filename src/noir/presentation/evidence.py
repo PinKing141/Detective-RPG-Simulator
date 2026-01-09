@@ -42,6 +42,7 @@ class ForensicsResult(EvidenceItem):
     finding: str
     method: str
     method_category: str
+    location_id: UUID | None = None
 
 
 class ForensicObservation(EvidenceItem):
@@ -49,6 +50,7 @@ class ForensicObservation(EvidenceItem):
     tod_window: Tuple[int, int] | None = None
     wound_class: str | None = None
     stage_hint: str | None = None
+    location_id: UUID | None = None
 
 
 class PresentationCase(BaseModel):

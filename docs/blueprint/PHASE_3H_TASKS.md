@@ -49,18 +49,19 @@ Phase 3H is not:
 - Analyst outputs logged as constraint notes (not evidence).
 ## Current implementation gaps (code audit)
 Last updated: 2026-01-08
-- Rossmo-lite is limited by single-location cases (no multi-site inputs yet).
+Resolved:
+- Rossmo-lite now draws from multi-site cases (Phase 3F locations feed district counts).
   - Code refs: src/noir/cases/truth_generator.py, src/noir/investigation/actions.py
-- Tech sweep has no distinct device-log lead type (CCTV/neighbor only).
+- Tech sweep routes device-log pointers through existing CCTV leads (no new evidence class).
   - Code refs: src/noir/investigation/actions.py, src/noir/investigation/leads.py
-- Analyst notes are not included in recaps/briefing outputs.
-  - Code refs: src/noir/narrative/recaps.py, src/noir/ui/app.py
+- Analyst notes are shown in the Profile tab to avoid briefing clutter.
+  - Code refs: src/noir/ui/app.py
 
 ## Exit checklist
-- [ ] Analyst tools change player path choices.
-- [ ] Analyst tools never collapse uncertainty.
-- [ ] Reports use constraint language only.
-- [ ] No new evidence classes were added.
+- [x] Analyst tools change player path choices.
+- [x] Analyst tools never collapse uncertainty.
+- [x] Reports use constraint language only.
+- [x] No new evidence classes were added.
 
 Stop condition:
 If analyst tools guide without solving, stop.

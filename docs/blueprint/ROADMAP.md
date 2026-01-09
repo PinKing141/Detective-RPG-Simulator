@@ -391,15 +391,21 @@ Full spec: docs/blueprint/PHASE_4_TASKS.md
 Phase 4 is about campaign closure and identity reflection. It reads existing systems.
 It does not add new investigation mechanics or late-game difficulty spikes.
 
+Phase 4 alignment (dependencies, no duplication)
+- Episode titles and recaps come from Phase 3C; Phase 4 uses them, does not expand them.
+- Multi-site cases come from Phase 3F; Phase 4 schedules them, does not add new travel mechanics.
+- The Unsub profile board (3G) and analyst tools (3H) feed closing-in logic; no new profiling logic is added.
+- Reuse nemesis_exposure (Phase 3E). Do not introduce separate nemesis meters.
+
 Phase 4 identity use (safe scope)
 - Country/religion can add narrative texture and social stakes.
 - Community relationships can carry forward as cooperation modifiers.
 - Still no guilt inference from identity; these are context only.
 
 Phase 4 deliverables (artifacts)
-- Campaign state model (season progress, pressure/trust, arc flags).
+- Campaign state model (season progress, pressure/trust, nemesis_exposure, closing-in counters).
 - Case queue and pacing rules (tension wave).
-- Nemesis arc controller (closing-in logic).
+- Nemesis arc controller (closing-in logic fed by 3G/3H outputs).
 - Endings system (early + final endings).
 - Epilogue generator (identity-based summary).
 - Save/load includes campaign and ending flags.
@@ -407,7 +413,7 @@ Phase 4 deliverables (artifacts)
 Phase 4 systems (what to build)
 1) Campaign structure
    - Variables: episode_index, case_queue, pressure, trust, clearance_rate (optional),
-     nemesis_progress, nemesis_risk.
+     nemesis_exposure, closing_in (pattern/narrowing/proof).
    - Pacing rule: spike, relief, spike, endgame (no invented drama).
 2) Nemesis arc resolution
    - Closing-in requirements: pattern confidence, narrowing, proof threshold.
