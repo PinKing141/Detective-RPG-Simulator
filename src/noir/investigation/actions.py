@@ -429,7 +429,10 @@ def visit_location(
             cooperation_change=0.0,
         )
     state.active_location_id = location_id
-    destination = location_name or "a new location"
+    if location_name:
+        destination = place_with_article(location_name)
+    else:
+        destination = "a new location"
     summary = f"Travelled to {destination}."
     return ActionResult(
         action=ActionType.VISIT_LOCATION,

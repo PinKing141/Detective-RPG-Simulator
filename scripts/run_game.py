@@ -60,6 +60,7 @@ from noir.narrative.recaps import (
     build_partner_line,
     build_previously_on,
 )
+from noir.util.grammar import dedupe_lines
 from noir.narrative.endings import build_final_ending, check_early_ending
 from noir.narrative.debriefs import build_post_arrest_statement
 from noir.nemesis import (
@@ -661,13 +662,23 @@ def _selected_evidence_summary(presentation, evidence_id) -> str | None:
     return _format_evidence_summary(item)
 
 
-def _print_case_start(truth, state: InvestigationState, modifiers: CaseStartModifiers) -> None:
+def _print_case_start(
+    truth,
+    state: InvestigationState,
+    modifiers: CaseStartModifiers,
+    printed: set[str] | None = None,
+) -> set[str]:
     print(
         f"Case {truth.case_id} started. Investigation time limit {TIME_LIMIT}, "
         f"pressure tolerance {PRESSURE_LIMIT}, trust {state.trust}/{TRUST_LIMIT}."
     )
-    for line in modifiers.briefing_lines:
+    printed = printed or set()
+    for line in dedupe_lines(modifiers.briefing_lines):
+        if line in printed:
+            continue
         print(line)
+        printed.add(line)
+    return printed
 
 
 def _print_episode_intro(
@@ -678,11 +689,12 @@ def _print_episode_intro(
     episode_index: int,
     world: WorldState,
     case_archetype: str | None = None,
-) -> None:
+) -> set[str]:
+    printed: set[str] = set()
+    lines: list[str] = []
     if show_previously:
         recap_lines = build_previously_on(world)
-        for line in recap_lines:
-            print(line)
+        lines.extend(recap_lines)
     if world.endgame_ready():
         episode_kind = "nemesis"
     else:
@@ -707,12 +719,15 @@ def _print_episode_intro(
         title_state=world.episode_titles,
     )
     episode_code = f"S{world.campaign.season_index}E{episode_index}"
-    print(f"Episode: {episode_code} - {episode_title}")
-    cold_open = build_cold_open(episode_rng, location_name)
-    for line in cold_open:
+    lines.append(f"Episode: {episode_code} - {episode_title}")
+    lines.extend(build_cold_open(episode_rng, location_name))
+    lines.extend(build_partner_line(episode_rng))
+    for line in dedupe_lines(lines):
+        if line in printed:
+            continue
         print(line)
-    for line in build_partner_line(episode_rng):
-        print(line)
+        printed.add(line)
+    return printed
 
 
 def _start_case(
@@ -1019,7 +1034,7 @@ def main() -> None:
             district = active_state.district
 
     episode_rng = base_rng.fork(f"episode-{case_index}")
-    _print_episode_intro(
+    printed_lines = _print_episode_intro(
         episode_rng,
         location_name,
         district,
@@ -1028,7 +1043,7 @@ def main() -> None:
         world=world,
         case_archetype=case_facts.get("case_archetype"),
     )
-    _print_case_start(truth, state, modifiers)
+    _print_case_start(truth, state, modifiers, printed_lines)
     print("Type a number to choose an action. Type 'q' to quit.")
 
     while True:
@@ -1670,7 +1685,7 @@ def main() -> None:
             selected_evidence_id = None
             profile_lines = []
             episode_rng = base_rng.fork(f"episode-{case_index}")
-            _print_episode_intro(
+            printed_lines = _print_episode_intro(
                 episode_rng,
                 location_name,
                 district,
@@ -1679,7 +1694,7 @@ def main() -> None:
                 world=world,
                 case_archetype=case_facts.get("case_archetype"),
             )
-            _print_case_start(truth, state, modifiers)
+            _print_case_start(truth, state, modifiers, printed_lines)
 
     if world_store:
         world_store.save_world_state(world)

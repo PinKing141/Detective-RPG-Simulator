@@ -84,7 +84,7 @@ from noir.profiling.profile import (
 )
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
 from noir.util.rng import Rng
-from noir.util.grammar import normalize_line
+from noir.util.grammar import dedupe_lines, normalize_line
 from noir.persistence.db import WorldStore
 from noir.world.autonomy import apply_autonomy
 from noir.world.state import CaseStartModifiers, EndgameState, PersonRecord, WorldState
@@ -446,7 +446,7 @@ class Phase05App(App):
                 labels.append(f"[bold reverse]{label}[/]")
             else:
                 labels.append(label)
-        tabs.update("Tabs: " + "  ".join(labels))
+        tabs.update(" | ".join(labels))
 
     def _refresh_lists(self) -> None:
         self._refresh_briefing()
@@ -536,29 +536,32 @@ class Phase05App(App):
 
     def _refresh_header(self) -> None:
         header = self.query_one("#header", Static)
-        time_line = (
-            f"Case: {self.truth.case_id}  Investigation Time {self.state.time}/{TIME_LIMIT}  "
-            f"Pressure {self.state.pressure}/{PRESSURE_LIMIT}  "
-            f"Trust {self.state.trust}/{TRUST_LIMIT}  "
-            f"Gaze {gaze_label(self.gaze_mode)} (G: toggle)"
+        state = self.state
+        if state is None:
+            return
+        parts = [f"Case: {self.truth.case_id}"]
+        if self.episode_code:
+            parts.append(self.episode_code)
+        parts.extend(
+            [
+                f"Investigation Time {state.time}/{TIME_LIMIT}",
+                f"Pressure {state.pressure}/{PRESSURE_LIMIT}",
+                f"Trust {state.trust}/{TRUST_LIMIT}",
+                f"Gaze {gaze_label(self.gaze_mode)} (G: toggle)",
+            ]
         )
-        lines = [time_line, f"Location: {self.location_name} ({self.district})"]
-        scene_mode = None
-        case_archetype = None
-        scene_layout = self.case_facts.get("scene_layout")
-        if isinstance(scene_layout, dict):
-            scene_mode = scene_layout.get("mode")
-        if isinstance(self.case_facts, dict):
-            case_archetype = self.case_facts.get("case_archetype")
-        if scene_mode or case_archetype:
-            parts = []
-            if case_archetype:
-                parts.append(f"Archetype: {case_archetype}")
-            if scene_mode:
-                parts.append(f"Scene: {scene_mode}")
-            lines.append(" | ".join(parts))
-        lines.extend(self._hypothesis_lines())
+        lines = ["  ".join(parts), self._hypothesis_summary_line()]
         header.update("\n".join(lines))
+
+    def _hypothesis_summary_line(self) -> str:
+        if self.board.hypothesis is None:
+            return "Hypothesis: (none)"
+        suspect = self.truth.people.get(self.board.hypothesis.suspect_id)
+        suspect_name = suspect.name if suspect else "Unknown"
+        claims = ", ".join(self._format_claim(claim) for claim in self.board.hypothesis.claims)
+        evd_count = len(self.board.hypothesis.evidence_ids)
+        claim_text = claims or "(none)"
+        return f"Hypothesis: {suspect_name} | Claims: {claim_text} | Evd: {evd_count}"
 
     def _refresh_detail(self, result) -> None:
         detail = self.query_one("#detail_view", Static)
@@ -1690,6 +1693,7 @@ class Phase05App(App):
         intro_lines.append(f"Episode: {self.episode_code} - {episode_title}")
         intro_lines.extend(build_cold_open(episode_rng, self.location_name))
         intro_lines.extend(build_partner_line(episode_rng))
+        intro_lines = dedupe_lines(intro_lines)
         briefing_lines = [line for line in intro_lines if not line.startswith("Episode:")]
         if intro_lines:
             if self._has_mounted:
@@ -1707,7 +1711,6 @@ class Phase05App(App):
                 lead_deadline_delta=self.case_modifiers.lead_deadline_delta,
                 briefing_lines=self.case_modifiers.briefing_lines + nemesis_lines,
             )
-        briefing_lines.extend(self.case_modifiers.briefing_lines)
         if self.last_pattern_addendum:
             briefing_lines.append(
                 f"Pattern file updated: {self.last_pattern_addendum.label}."
@@ -1748,13 +1751,19 @@ class Phase05App(App):
                 + ["A familiar name is attached to the file."],
             )
         if self.case_modifiers:
+            briefing_payload = [
+                line
+                for line in dedupe_lines(self.case_modifiers.briefing_lines)
+                if line not in intro_lines
+            ]
+            briefing_lines.extend(briefing_payload)
             if self._has_mounted:
-                for line in self.case_modifiers.briefing_lines:
+                for line in briefing_payload:
                     self._write(line)
             else:
-                self._pending_briefing = list(self.case_modifiers.briefing_lines)
+                self._pending_briefing = list(briefing_payload)
         self.briefing_title = "CASE BRIEFING"
-        self.briefing_lines = briefing_lines
+        self.briefing_lines = dedupe_lines(briefing_lines)
         self.view_mode = "briefing"
         if self._has_mounted:
             self._refresh_tabs()

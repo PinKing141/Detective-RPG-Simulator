@@ -30,6 +30,21 @@ def normalize_lines(lines: list[str]) -> list[str]:
     return [normalize_line(line) if line else line for line in lines]
 
 
+def dedupe_lines(lines: list[str]) -> list[str]:
+    """Remove duplicate non-empty lines while preserving order."""
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for line in lines:
+        if not line:
+            deduped.append(line)
+            continue
+        if line in seen:
+            continue
+        seen.add(line)
+        deduped.append(line)
+    return deduped
+
+
 def place_with_article(place: str) -> str:
     """Ensure location strings read naturally with an article."""
     trimmed = place.strip()
