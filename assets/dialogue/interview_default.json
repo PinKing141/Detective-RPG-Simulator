@@ -7,264 +7,33 @@
         "text": "",
         "choices": [
           {
-            "text": "Ask where they were",
-            "leads_to": "LOCATION_PRESENCE",
-            "tags": ["presence", "baseline"]
+            "text": "Ask who was around",
+            "leads_to": "PRESENCE",
+            "tags": ["presence"]
           },
           {
-            "text": "Ask what they saw",
-            "leads_to": "WITNESS_ACCOUNT",
-            "tags": ["presence", "witness"]
+            "text": "Ask about the time window",
+            "leads_to": "TIMING",
+            "tags": ["opportunity", "timeline"]
           },
           {
-            "text": "Probe the timeline",
-            "leads_to": "TIMING_WINDOW",
-            "tags": ["timeline", "opportunity"]
-          },
-          {
-            "text": "Challenge their alibi",
-            "leads_to": "ALIBI_PROBE",
-            "tags": ["alibi", "opportunity", "pressure"]
-          },
-          {
-            "text": "Ask about their connection to the victim",
-            "leads_to": "VICTIM_RELATION",
+            "text": "Ask about prior contact",
+            "leads_to": "RELATION",
             "tags": ["relationship"]
-          },
-          {
-            "text": "Ask about the suspect's recent behavior",
-            "leads_to": "SUSPECT_BEHAVIOR",
-            "tags": ["behavior", "relationship"]
-          },
-          {
-            "text": "Press on the contradictions",
-            "leads_to": "CONTRADICTION_PRESS",
-            "tags": ["pressure", "contradiction"]
-          },
-          {
-            "text": "Suggest you understand why it happened",
-            "leads_to": "THEME_ENTRY",
-            "tags": ["blame_victim", "circumstance", "altruistic", "accidental", "theme"]
-          }
-        ]
-      },
-
-      {
-        "id": "LOCATION_PRESENCE",
-        "text": "I was around {place} that evening. Did not go far.",
-        "choices": [
-          {
-            "text": "Where exactly?",
-            "leads_to": "LOCATION_PRECISE",
-            "tags": []
-          },
-          {
-            "text": "Were you alone?",
-            "leads_to": "LOCATION_ALONE",
-            "tags": []
           }
         ]
       },
       {
-        "id": "LOCATION_PRECISE",
-        "text": "Inside {place} the whole time. Never left. I had the television on. I remember that clearly."
+        "id": "PRESENCE",
+        "text": "I saw {suspect} near {place} {time_phrase}."
       },
       {
-        "id": "LOCATION_ALONE",
-        "text": "Alone, yes. No one to verify it. I know how that sounds, but I cannot manufacture a witness for you."
-      },
-
-      {
-        "id": "WITNESS_ACCOUNT",
-        "text": "I saw {suspect} near {place} {time_phrase}. Kept their head down. I did not think much of it at the time.",
-        "choices": [
-          {
-            "text": "What exactly were they doing?",
-            "leads_to": "WITNESS_DETAIL",
-            "tags": []
-          },
-          {
-            "text": "Are you certain it was them?",
-            "leads_to": "WITNESS_CERTAIN",
-            "tags": []
-          }
-        ]
+        "id": "TIMING",
+        "text": "It was {time_phrase} when I heard something outside {place}."
       },
       {
-        "id": "WITNESS_DETAIL",
-        "text": "Moving quickly. Not running, but not casual either. The kind of pace someone uses when they want to be somewhere else."
-      },
-      {
-        "id": "WITNESS_CERTAIN",
-        "text": "I know what I saw. The light was on. I was not far away. I have no reason to lie to you about this."
-      },
-
-      {
-        "id": "TIMING_WINDOW",
-        "text": "It was {time_phrase}. I heard something. A sound I could not place. I told myself it was nothing.",
-        "choices": [
-          {
-            "text": "How precise is that estimate?",
-            "leads_to": "TIMING_PRECISE",
-            "tags": []
-          },
-          {
-            "text": "What were you doing at that time?",
-            "leads_to": "TIMING_ACTIVITY",
-            "tags": []
-          }
-        ]
-      },
-      {
-        "id": "TIMING_PRECISE",
-        "text": "I checked my watch. {time_phrase}, I am sure of it. I was waiting for someone who never arrived. You tend to watch the clock in those situations."
-      },
-      {
-        "id": "TIMING_ACTIVITY",
-        "text": "I was inside {place}. Reading. Or trying to. I heard the sound outside and I just sat there. I am not proud of that."
-      },
-
-      {
-        "id": "ALIBI_PROBE",
-        "text": "I was at {place} that evening. The whole time. I do not see why that is a problem.",
-        "choices": [
-          {
-            "text": "Can anyone confirm that?",
-            "leads_to": "ALIBI_CORROBORATE",
-            "tags": []
-          },
-          {
-            "text": "That does not cover the full window.",
-            "leads_to": "ALIBI_GAP",
-            "tags": []
-          }
-        ]
-      },
-      {
-        "id": "ALIBI_CORROBORATE",
-        "text": "You can ask around. Someone must have seen me there. I was not hiding. I had no reason to hide."
-      },
-      {
-        "id": "ALIBI_GAP",
-        "text": "I stepped out. Briefly. I do not remember the exact time. Five minutes, maybe ten. Are you saying that matters?"
-      },
-
-      {
-        "id": "VICTIM_RELATION",
-        "text": "I knew them. Not well. The kind of acquaintance where you nod in passing and do not ask questions.",
-        "choices": [
-          {
-            "text": "Was the relationship tense?",
-            "leads_to": "RELATION_TENSE",
-            "tags": []
-          },
-          {
-            "text": "When did you last speak to them?",
-            "leads_to": "RELATION_LAST_SEEN",
-            "tags": []
-          }
-        ]
-      },
-      {
-        "id": "RELATION_TENSE",
-        "text": "We had our difficulties. That is private. Every relationship has difficulties. It does not make me a suspect."
-      },
-      {
-        "id": "RELATION_LAST_SEEN",
-        "text": "A week ago, maybe. We exchanged a few words near {place}. Nothing significant. Or at least, I did not think so then."
-      },
-
-      {
-        "id": "SUSPECT_BEHAVIOR",
-        "text": "{suspect} seemed different lately. I noticed it but I did not say anything. Not my place.",
-        "choices": [
-          {
-            "text": "Different how? Be specific.",
-            "leads_to": "BEHAVIOR_UNUSUAL",
-            "tags": []
-          },
-          {
-            "text": "Were they under pressure from someone?",
-            "leads_to": "BEHAVIOR_STRESS",
-            "tags": []
-          }
-        ]
-      },
-      {
-        "id": "BEHAVIOR_UNUSUAL",
-        "text": "Distracted. Startled at small things. Like they were waiting for something bad to happen. I thought it was personal trouble."
-      },
-      {
-        "id": "BEHAVIOR_STRESS",
-        "text": "Someone, or something. They would not say. But they stopped coming around {place} the way they used to. Started avoiding people."
-      },
-
-      {
-        "id": "CONTRADICTION_PRESS",
-        "text": "I am telling you what I know. I do not know what you think you have, but I am not changing my account.",
-        "choices": [
-          {
-            "text": "Your story does not match what others told us.",
-            "leads_to": "PRESS_DENY",
-            "tags": []
-          },
-          {
-            "text": "Think carefully before you answer again.",
-            "leads_to": "PRESS_RECONSIDER",
-            "tags": []
-          }
-        ]
-      },
-      {
-        "id": "PRESS_DENY",
-        "text": "Then someone else is lying. It is not me. I have told you the same thing three times. What do you need to hear?"
-      },
-      {
-        "id": "PRESS_RECONSIDER",
-        "text": "I may have the time wrong. I was not counting minutes. But what I saw, what I heard — that part is accurate."
-      },
-
-      {
-        "id": "THEME_ENTRY",
-        "text": "What are you suggesting exactly?",
-        "choices": [
-          {
-            "text": "That the victim may have pushed someone past their limit.",
-            "leads_to": "THEME_BLAME_VICTIM",
-            "tags": ["blame_victim"]
-          },
-          {
-            "text": "That circumstances can back a person into a corner.",
-            "leads_to": "THEME_CIRCUMSTANCE",
-            "tags": ["circumstance"]
-          },
-          {
-            "text": "That someone may have been trying to protect another person.",
-            "leads_to": "THEME_ALTRUISTIC",
-            "tags": ["altruistic"]
-          },
-          {
-            "text": "That this may not have been intended to go this far.",
-            "leads_to": "THEME_ACCIDENTAL",
-            "tags": ["accidental"]
-          }
-        ]
-      },
-      {
-        "id": "THEME_BLAME_VICTIM",
-        "text": "I will not say they deserved it. But I will say this — not everyone treated them with much decency. There were grievances. Real ones."
-      },
-      {
-        "id": "THEME_CIRCUMSTANCE",
-        "text": "I do not know what they were into. Money, maybe. Obligations they could not meet. People make decisions when they are desperate that they would never make otherwise."
-      },
-      {
-        "id": "THEME_ALTRUISTIC",
-        "text": "If someone did this to keep another person safe... I do not know. I would need to understand the whole picture before I said anything more."
-      },
-      {
-        "id": "THEME_ACCIDENTAL",
-        "text": "Is that what you think happened? It is possible. Though it did not look like an accident from where I was standing. But I could be wrong."
+        "id": "RELATION",
+        "text": "I have seen {suspect} around {place} before, but I did not speak to them."
       }
     ]
   }
