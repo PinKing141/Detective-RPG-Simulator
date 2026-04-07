@@ -82,6 +82,25 @@ def load_default_interview_graph() -> DialogGraph | None:
     return load_dialog_graph(path)
 
 
+_ROLE_FILE_MAP: dict[str, str] = {
+    "suspect": "interview_suspect.json",
+    "hostile_witness": "interview_hostile_witness.json",
+    "neighbor": "interview_neighbor.json",
+    "default": "interview_default.json",
+}
+
+
+@lru_cache(maxsize=8)
+def load_interview_graph_for_role(role_key: str) -> DialogGraph | None:
+    filename = _ROLE_FILE_MAP.get(role_key, "interview_default.json")
+    path = _repo_root() / "assets" / "dialogue" / filename
+    graph = load_dialog_graph(path)
+    if graph is None and role_key != "default":
+        path = _repo_root() / "assets" / "dialogue" / "interview_default.json"
+        graph = load_dialog_graph(path)
+    return graph
+
+
 def select_choice_index(node: DialogNode, tags: Iterable[str]) -> int | None:
     tag_set = set(tags)
     if not node.choices:

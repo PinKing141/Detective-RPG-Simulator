@@ -19,6 +19,7 @@ from noir.investigation.costs import (
 from noir.investigation.dialog_graph import (
     choice_label_for,
     load_default_interview_graph,
+    load_interview_graph_for_role,
     render_dialog_text,
     select_choice_index,
 )
@@ -367,14 +368,32 @@ def _theme_match(theme: InterviewTheme | None, motive_category: str) -> bool:
     return False
 
 
+def _resolve_dialog_role(
+    person_id: UUID,
+    truth: TruthState,
+    interview_state: InterviewState,
+) -> str:
+    person = truth.people.get(person_id)
+    if person is None:
+        return "default"
+    if RoleTag.OFFENDER in person.role_tags:
+        return "suspect"
+    if interview_state.motive_to_lie:
+        return "hostile_witness"
+    if person.traits.get("witness_role") == "neighbor":
+        return "neighbor"
+    return "default"
+
+
 def _dialog_statement_from_graph(
     interview_state: InterviewState,
     approach: InterviewApproach,
     theme: InterviewTheme | None,
     context: dict[str, str],
     dialog_choice_index: int | None,
+    role_key: str = "default",
 ) -> str | None:
-    graph = load_default_interview_graph()
+    graph = load_interview_graph_for_role(role_key)
     if graph is None:
         return None
     node_id = interview_state.dialog_node_id or graph.root_node_id
@@ -537,8 +556,9 @@ def interview(
     apply_action(truth, EventKind.INTERVIEW, state.time, location_id, participants=[person_id])
     notes = update_lead_statuses(state)
     interview_state = _interview_state(state, person_id, truth)
+    role_key = _resolve_dialog_role(person_id, truth, interview_state)
     if dialog_choice_index is not None:
-        graph = load_default_interview_graph()
+        graph = load_interview_graph_for_role(role_key)
         if graph is not None:
             node_id = interview_state.dialog_node_id or graph.root_node_id
             label = choice_label_for(graph, node_id, dialog_choice_index)
@@ -676,7 +696,7 @@ def interview(
                 "approach": approach.value,
             }
             dialog_statement = _dialog_statement_from_graph(
-                interview_state, approach, theme, dialog_context, dialog_choice_index
+                interview_state, approach, theme, dialog_context, dialog_choice_index, role_key
             )
             if dialog_statement:
                 statement = dialog_statement
@@ -878,7 +898,7 @@ def interview(
                 "approach": approach.value,
             }
             dialog_statement = _dialog_statement_from_graph(
-                interview_state, approach, theme, dialog_context, dialog_choice_index
+                interview_state, approach, theme, dialog_context, dialog_choice_index, role_key
             )
             if dialog_statement:
                 statement = dialog_statement
