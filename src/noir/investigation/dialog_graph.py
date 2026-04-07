@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from functools import lru_cache
-from typing import Iterable
+from typing import Iterable, Mapping
+
+from noir.domain.enums import RoleTag
 
 
 @dataclass(frozen=True)
@@ -76,10 +78,87 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _dialog_path_for_role(role_key: str) -> Path:
+    safe_key = role_key.strip().lower() if role_key else "default"
+    if not safe_key:
+        safe_key = "default"
+    return _repo_root() / "assets" / "dialogue" / f"interview_{safe_key}.json"
+
+
+@lru_cache(maxsize=8)
+def load_interview_graph(role_key: str = "default") -> DialogGraph | None:
+    path = _dialog_path_for_role(role_key)
+    graph = load_dialog_graph(path)
+    if graph is not None or role_key == "default":
+        return graph
+    return load_interview_graph("default")
+
+
 @lru_cache(maxsize=1)
 def load_default_interview_graph() -> DialogGraph | None:
-    path = _repo_root() / "assets" / "dialogue" / "interview_default.json"
+    path = _dialog_path_for_role("default")
     return load_dialog_graph(path)
+
+
+def resolve_dialog_role_key(
+    role_tags: Iterable[RoleTag] | Iterable[str],
+    traits: Mapping[str, object] | None,
+    motive_to_lie: bool = False,
+    relationship_closeness: str | None = None,
+    relationship_type: str | None = None,
+) -> str:
+    tag_values = {
+        tag.value if isinstance(tag, RoleTag) else str(tag)
+        for tag in role_tags or []
+    }
+    trait_map = traits or {}
+    witness_role = str(trait_map.get("witness_role", "") or "").lower()
+    neighbor_role = str(trait_map.get("neighbor_role", "") or "").lower()
+    closeness = str(relationship_closeness or "").lower()
+    rel_type = str(relationship_type or "").lower()
+
+    staff_roles = {
+        "staff",
+        "security",
+        "maintenance",
+        "clerk",
+        "cashier",
+        "bartender",
+        "attendant",
+        "concierge",
+        "manager",
+        "reception",
+        "receptionist",
+    }
+    passerby_roles = {
+        "passerby",
+        "visitor",
+        "guest",
+        "commuter",
+        "driver",
+        "customer",
+        "pedestrian",
+        "outsider",
+    }
+    intimate_types = {"parent", "partner", "lover", "sibling"}
+
+    if RoleTag.OFFENDER.value in tag_values or RoleTag.SUSPECT.value in tag_values:
+        return "suspect"
+    if witness_role in {"neighbor", "resident", "tenant"}:
+        return "neighbor"
+    if neighbor_role and any(
+        token in neighbor_role for token in ("neighbor", "resident", "tenant")
+    ):
+        return "neighbor"
+    if closeness == "intimate" or rel_type in intimate_types:
+        return "intimate"
+    if witness_role in staff_roles or any(token in neighbor_role for token in staff_roles):
+        return "staff"
+    if motive_to_lie:
+        return "hostile_witness"
+    if witness_role in passerby_roles:
+        return "passerby"
+    return "default"
 
 
 def select_choice_index(node: DialogNode, tags: Iterable[str]) -> int | None:

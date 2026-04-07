@@ -53,6 +53,7 @@ class NemesisCasePlan:
     visibility: int = 1
     degraded_execution: bool = False
     taunt_style: str | None = None
+    component_values: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -168,8 +169,6 @@ _METHODS = ["sharp", "blunt", "poison"]
 _CLEANUP = ["none", "wipe", "staging", "arson"]
 _EXITS = ["walkaway", "vehicle", "misdirection"]
 
-_ADAPT_COOLDOWN = 2
-
 
 def create_nemesis_state(rng: Rng, comfort_zones: list[str] | None = None) -> NemesisState:
     typology = rng.choice(list(NemesisTypology))
@@ -204,16 +203,9 @@ def plan_nemesis_case(state: NemesisState, rng: Rng) -> NemesisCasePlan:
         state.cases_until_next -= 1
         return NemesisCasePlan(is_nemesis_case=False)
     state.cases_until_next = rng.randint(2, 4)
-    _decay_cooldowns(state)
-    method, degraded = _select_method_component(state, rng)
-    visibility = min(state.escalation_cap, 1 + state.exposure // 2)
-    return NemesisCasePlan(
-        is_nemesis_case=True,
-        method_category=method.value if method else None,
-        visibility=visibility,
-        degraded_execution=degraded,
-        taunt_style=state.profile.failure_echo,
-    )
+    from noir.nemesis.mo_adapter import plan_case_mo
+
+    return plan_case_mo(state, rng)
 
 
 def apply_nemesis_case_outcome(
@@ -224,26 +216,29 @@ def apply_nemesis_case_outcome(
     method_category: str | None,
     method_compromised: bool,
     rng: Rng,
+    selected_components: dict[str, str] | None = None,
 ) -> list[str]:
-    notes: list[str] = []
     if not was_nemesis_case:
-        return notes
-    delta = max(0, visibility - 1)
-    if arrest_result in {"success", "partial"}:
-        delta += 1
-    if arrest_result == "failed" and visibility <= 1:
-        delta -= 1
-    state.exposure = max(state.exposure_baseline, state.exposure + delta)
-    if delta > 0 and state.exposure > state.exposure_baseline:
-        state.exposure_baseline = max(state.exposure_baseline, state.exposure - 1)
+        return []
+
+    from noir.nemesis.mo_adapter import apply_case_feedback
+
+    component_values = dict(selected_components or {})
+    if method_category and NemesisComponentType.METHOD.value not in component_values:
+        component_values[NemesisComponentType.METHOD.value] = method_category
+
+    compromised_components: dict[str, str] = {}
     if method_compromised:
-        _mark_method_compromised(state, method_category)
-        notes.append("Pattern file notes a compromised method.")
-    if arrest_result == "failed":
-        state.profile.failure_echo = rng.choice(
-            ["irritated", "defensive", "taunting", "quiet"]
-        )
-    return notes
+        compromised_components[NemesisComponentType.METHOD.value] = method_category or ""
+
+    return apply_case_feedback(
+        state,
+        visibility,
+        arrest_result,
+        component_values,
+        compromised_components,
+        rng,
+    )
 
 
 def _build_components(
@@ -269,61 +264,3 @@ def _seed_weaknesses(rng: Rng, components: list[NemesisComponent], count: int = 
     rng.shuffle(candidates)
     for comp in candidates[:count]:
         comp.competence = round(0.2 + rng.random() * 0.2, 2)
-
-
-def _decay_cooldowns(state: NemesisState) -> None:
-    for comp in state.mo_components:
-        if comp.avoid_cooldown > 0:
-            comp.avoid_cooldown -= 1
-
-
-def _select_method_component(
-    state: NemesisState, rng: Rng
-) -> tuple[NemesisComponent | None, bool]:
-    methods = [
-        comp for comp in state.mo_components if comp.component_type == NemesisComponentType.METHOD
-    ]
-    if not methods:
-        return None, False
-    weights: list[float] = []
-    for comp in methods:
-        weight = comp.weight
-        if comp.compromised and comp.avoid_cooldown == 0:
-            weight *= 0.4
-        weights.append(weight)
-    chosen = _weighted_pick(rng, methods, weights)
-    degraded = bool(chosen.compromised and chosen.avoid_cooldown > 0)
-    for comp in methods:
-        if comp is chosen:
-            continue
-        if comp.compromised and comp.avoid_cooldown == 0:
-            comp.avoid_cooldown = _ADAPT_COOLDOWN
-    return chosen, degraded
-
-
-def _mark_method_compromised(state: NemesisState, method_category: str | None) -> None:
-    methods = [
-        comp for comp in state.mo_components if comp.component_type == NemesisComponentType.METHOD
-    ]
-    if not methods:
-        return
-    if method_category:
-        for comp in methods:
-            if comp.value == method_category:
-                comp.compromised = True
-                return
-    methods.sort(key=lambda comp: comp.weight, reverse=True)
-    methods[0].compromised = True
-
-
-def _weighted_pick(rng: Rng, items: list[NemesisComponent], weights: list[float]) -> NemesisComponent:
-    total = sum(weights)
-    if total <= 0:
-        return items[0]
-    pick = rng.random() * total
-    cumulative = 0.0
-    for item, weight in zip(items, weights):
-        cumulative += weight
-        if pick <= cumulative:
-            return item
-    return items[-1]

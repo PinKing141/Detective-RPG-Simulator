@@ -34,7 +34,7 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
-from noir.investigation.dialog_graph import load_default_interview_graph
+from noir.investigation.dialog_graph import load_interview_graph, resolve_dialog_role_key
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
 from noir.investigation.leads import (
     LeadStatus,
@@ -1188,6 +1188,8 @@ class Phase05App(App):
             self.board.hypothesis.evidence_ids,
             self.board.hypothesis.suspect_id,
             self.board.hypothesis.claims,
+            truth=self.truth,
+            state=self.state,
         )
         gap_summary = "; ".join(claim_support.missing) if claim_support.missing else "(none)"
         return [
@@ -1531,6 +1533,7 @@ class Phase05App(App):
         if self.world.nemesis_state and self.case_facts.get("nemesis_case"):
             visibility = int(self.case_facts.get("nemesis_visibility", 1))
             method_category = self.case_facts.get("nemesis_method") or None
+            selected_components = dict(self.case_facts.get("nemesis_components") or {})
             method_compromised = self._nemesis_method_compromised()
             nemesis_notes = apply_nemesis_case_outcome(
                 self.world.nemesis_state,
@@ -1540,6 +1543,7 @@ class Phase05App(App):
                 method_category,
                 method_compromised,
                 self.base_rng.fork(f"nemesis-outcome-{self.case_index}"),
+                selected_components=selected_components,
             )
             self.world.nemesis_exposure = self.world.nemesis_state.exposure
         if nemesis_notes:
@@ -1801,10 +1805,41 @@ class Phase05App(App):
         approach: InterviewApproach,
         theme: InterviewTheme | None,
     ) -> bool:
-        graph = load_default_interview_graph()
-        if graph is None:
+        person = self.truth.people.get(witness_id) if self.truth else None
+        if person is None:
             return False
         interview_state = self.state.interviews.get(str(witness_id)) if self.state else None
+        relationship_closeness = None
+        relationship_type = None
+        if self.truth is not None:
+            victim = next(
+                (candidate for candidate in self.truth.people.values() if RoleTag.VICTIM in candidate.role_tags),
+                None,
+            )
+            offender = next(
+                (candidate for candidate in self.truth.people.values() if RoleTag.OFFENDER in candidate.role_tags),
+                None,
+            )
+            for related_person in (victim, offender):
+                if related_person is None:
+                    continue
+                relation = self.truth.relationship_between(witness_id, related_person.id)
+                if not relation:
+                    continue
+                relationship_closeness = str(relation.get("closeness", "") or "")
+                relationship_type = str(relation.get("relationship_type", "") or "")
+                if relationship_closeness.lower() == "intimate":
+                    break
+        role_key = resolve_dialog_role_key(
+            person.role_tags,
+            person.traits if isinstance(person.traits, dict) else None,
+            motive_to_lie=bool(interview_state and interview_state.motive_to_lie),
+            relationship_closeness=relationship_closeness,
+            relationship_type=relationship_type,
+        )
+        graph = load_interview_graph(role_key)
+        if graph is None:
+            return False
         node_id = graph.root_node_id
         if interview_state and interview_state.dialog_node_id:
             node_id = interview_state.dialog_node_id

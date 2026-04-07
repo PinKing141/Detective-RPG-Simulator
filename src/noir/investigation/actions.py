@@ -18,8 +18,9 @@ from noir.investigation.costs import (
 )
 from noir.investigation.dialog_graph import (
     choice_label_for,
-    load_default_interview_graph,
+    load_interview_graph,
     render_dialog_text,
+    resolve_dialog_role_key,
     select_choice_index,
 )
 from noir.investigation.interviews import (
@@ -53,6 +54,7 @@ from noir.investigation.operations import (
 )
 from noir.investigation.results import ActionOutcome, ActionResult, InvestigationState
 from noir.locations.profiles import load_location_profiles
+from noir.narrative.styles import build_witness_line
 from noir.presentation.evidence import CCTVReport, EvidenceItem, PresentationCase, WitnessStatement
 from noir.naming import load_name_generator
 from noir.presentation.erosion import confidence_from_window, fuzz_time
@@ -373,8 +375,9 @@ def _dialog_statement_from_graph(
     theme: InterviewTheme | None,
     context: dict[str, str],
     dialog_choice_index: int | None,
+    role_key: str,
 ) -> str | None:
-    graph = load_default_interview_graph()
+    graph = load_interview_graph(role_key)
     if graph is None:
         return None
     node_id = interview_state.dialog_node_id or graph.root_node_id
@@ -409,6 +412,135 @@ def _dialog_statement_from_graph(
         interview_state.dialog_node_id = graph.root_node_id
     rendered = render_dialog_text(node.text, context)
     return rendered or None
+
+
+def _dialog_relationship_profile(
+    truth: TruthState,
+    person_id: UUID,
+) -> tuple[str | None, str | None]:
+    victim = next(
+        (person for person in truth.people.values() if RoleTag.VICTIM in person.role_tags),
+        None,
+    )
+    offender = next(
+        (person for person in truth.people.values() if RoleTag.OFFENDER in person.role_tags),
+        None,
+    )
+    relations = []
+    if victim is not None:
+        victim_relation = truth.relationship_between(person_id, victim.id)
+        if victim_relation:
+            relations.append(victim_relation)
+    if offender is not None:
+        offender_relation = truth.relationship_between(person_id, offender.id)
+        if offender_relation:
+            relations.append(offender_relation)
+    for relation in relations:
+        if str(relation.get("closeness", "") or "").lower() == "intimate":
+            return str(relation.get("closeness", "") or ""), str(
+                relation.get("relationship_type", "") or ""
+            )
+    if relations:
+        relation = relations[0]
+        return str(relation.get("closeness", "") or ""), str(
+            relation.get("relationship_type", "") or ""
+        )
+    return None, None
+
+
+def _dialog_role_key(
+    truth: TruthState,
+    person: Person,
+    interview_state: InterviewState,
+) -> str:
+    relationship_closeness, relationship_type = _dialog_relationship_profile(truth, person.id)
+    return resolve_dialog_role_key(
+        person.role_tags,
+        person.traits if isinstance(person.traits, dict) else None,
+        motive_to_lie=interview_state.motive_to_lie,
+        relationship_closeness=relationship_closeness,
+        relationship_type=relationship_type,
+    )
+
+
+def _witness_line_category(
+    role: str | None,
+    neighbor_role: str | None = None,
+    relationship_closeness: str | None = None,
+) -> str:
+    witness_role = str(role or "").lower()
+    relation = str(neighbor_role or "").lower()
+    staff_roles = {
+        "staff",
+        "security",
+        "maintenance",
+        "clerk",
+        "cashier",
+        "bartender",
+        "attendant",
+        "concierge",
+        "manager",
+        "reception",
+        "receptionist",
+    }
+    passerby_roles = {
+        "passerby",
+        "visitor",
+        "guest",
+        "commuter",
+        "driver",
+        "customer",
+        "pedestrian",
+        "outsider",
+    }
+    if str(relationship_closeness or "").lower() == "intimate":
+        return "intimate_lines"
+    if witness_role in {"neighbor", "resident", "tenant"} or any(
+        token in relation for token in ("neighbor", "resident", "tenant")
+    ):
+        return "neighbor_lines"
+    if witness_role in staff_roles or any(token in relation for token in staff_roles):
+        return "staff_lines"
+    if witness_role in passerby_roles:
+        return "passerby_lines"
+    return "lines"
+
+
+def _replace_subject_reference(line: str, subject_name: str | None) -> str:
+    if not subject_name:
+        return line
+    replacements = ("someone", "a person", "a figure", "a face")
+    updated = line
+    lowered = updated.lower()
+    for target in replacements:
+        index = lowered.find(target)
+        if index >= 0:
+            return updated[:index] + subject_name + updated[index + len(target):]
+    return updated
+
+
+def _anchor_witness_line(line: str, place: str) -> str:
+    lowered = line.lower()
+    if any(
+        token in lowered
+        for token in (" near ", " outside ", " inside ", " by ", " around ", place.lower())
+    ):
+        return line
+    suffix = f" near {place}."
+    if line.endswith("."):
+        return line[:-1] + suffix
+    return line + suffix
+
+
+def _live_witness_line(
+    rng: Rng,
+    category: str,
+    place: str,
+    subject_name: str | None = None,
+) -> str:
+    line = build_witness_line(rng, category) or "I heard a disturbance."
+    line = _replace_subject_reference(line, subject_name)
+    return _anchor_witness_line(line, place)
 
 
 def visit_location(
@@ -537,8 +669,30 @@ def interview(
     apply_action(truth, EventKind.INTERVIEW, state.time, location_id, participants=[person_id])
     notes = update_lead_statuses(state)
     interview_state = _interview_state(state, person_id, truth)
+    person = truth.people.get(person_id)
+    if person is None:
+        return ActionResult(
+            action=ActionType.INTERVIEW,
+            outcome=ActionOutcome.FAILURE,
+            summary="Interview target is missing.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    role_key = _dialog_role_key(truth, person, interview_state)
+    relationship_closeness, _ = _dialog_relationship_profile(truth, person_id)
+    witness_role = ""
+    neighbor_role = ""
+    if isinstance(person.traits, dict):
+        witness_role = str(person.traits.get("witness_role", "") or "")
+        neighbor_role = str(person.traits.get("neighbor_role", "") or "")
+    line_category = _witness_line_category(
+        witness_role,
+        neighbor_role=neighbor_role,
+        relationship_closeness=relationship_closeness,
+    )
     if dialog_choice_index is not None:
-        graph = load_default_interview_graph()
+        graph = load_interview_graph(role_key)
         if graph is not None:
             node_id = interview_state.dialog_node_id or graph.root_node_id
             label = choice_label_for(graph, node_id, dialog_choice_index)
@@ -666,9 +820,14 @@ def interview(
             rng = _interview_rng(truth, person_id, f"baseline:{state.time}")
             time_window = fuzz_time(kill_event.timestamp, sigma=1.5, rng=rng)
             time_phrase = _format_time_phrase(time_window)
-            statement = f"I heard a disturbance near {place}."
+            statement = _live_witness_line(rng.fork("baseline-heard"), line_category, place)
             if truth_seen and suspect_name:
-                statement = f"I saw {suspect_name} outside {place}."
+                statement = _live_witness_line(
+                    rng.fork("baseline-seen"),
+                    line_category,
+                    place,
+                    subject_name=suspect_name,
+                )
             dialog_context = {
                 "place": place,
                 "suspect": suspect_name,
@@ -676,7 +835,12 @@ def interview(
                 "approach": approach.value,
             }
             dialog_statement = _dialog_statement_from_graph(
-                interview_state, approach, theme, dialog_context, dialog_choice_index
+                interview_state,
+                approach,
+                theme,
+                dialog_context,
+                dialog_choice_index,
+                role_key,
             )
             if dialog_statement:
                 statement = dialog_statement
@@ -867,9 +1031,20 @@ def interview(
         elif lie_bias and lie_type == "denial":
             statement = f"I didn't see anyone, just noise around {time_phrase}."
         else:
-            statement = f"I saw {suspect_name} near {place} {time_phrase}."
+            statement = _live_witness_line(
+                rng.fork("followup-seen"),
+                line_category,
+                place,
+                subject_name=suspect_name if truth_seen else None,
+            )
+            if not statement.endswith("."):
+                statement += "."
+            statement = f"{statement[:-1]} {time_phrase}."
         if not truth_seen and not observed_person_ids and not confession:
-            statement = f"I heard a disturbance near {place} {time_phrase}."
+            statement = _live_witness_line(rng.fork("followup-heard"), line_category, place)
+            if not statement.endswith("."):
+                statement += "."
+            statement = f"{statement[:-1]} {time_phrase}."
         if not lie_bias and not confession:
             dialog_context = {
                 "place": place,
@@ -878,7 +1053,12 @@ def interview(
                 "approach": approach.value,
             }
             dialog_statement = _dialog_statement_from_graph(
-                interview_state, approach, theme, dialog_context, dialog_choice_index
+                interview_state,
+                approach,
+                theme,
+                dialog_context,
+                dialog_choice_index,
+                role_key,
             )
             if dialog_statement:
                 statement = dialog_statement
@@ -974,7 +1154,11 @@ def follow_neighbor_lead(
     role = _weighted_choice(rng, lead.witness_roles) or "witness"
     role_label = _neighbor_role_label(role)
     name_pick = _neighbor_name_pick(truth, rng)
-    traits: dict[str, float | str] = {"neighbor_role": role_label, "neighbor_slot": lead.slot_id}
+    traits: dict[str, float | str] = {
+        "neighbor_role": role_label,
+        "neighbor_slot": lead.slot_id,
+        "witness_role": role,
+    }
     if name_pick.country:
         traits["country_of_origin"] = name_pick.country
     witness = Person(
@@ -1030,10 +1214,17 @@ def follow_neighbor_lead(
         uncertainty_hooks.append("Visibility was partial from the witness position.")
     elif lead.hearing_bias >= 0.55 and saw_suspect and confidence == ConfidenceBand.MEDIUM:
         confidence = ConfidenceBand.STRONG
+    line_category = _witness_line_category(role, neighbor_role=role_label)
     if saw_suspect:
-        statement = f"As a {role_label}, I saw {suspect_name} near {place}."
+        witness_line = _live_witness_line(
+            rng.fork("neighbor-seen"),
+            line_category,
+            place,
+            subject_name=suspect_name,
+        )
     else:
-        statement = f"As a {role_label}, I heard a disturbance near {place}."
+        witness_line = _live_witness_line(rng.fork("neighbor-heard"), line_category, place)
+    statement = f"As a {role_label}, {witness_line[0].lower() + witness_line[1:]}"
     observed_person_ids = [suspect_id] if saw_suspect and suspect_id else []
     evidence = WitnessStatement(
         evidence_type=EvidenceType.TESTIMONIAL,

@@ -163,7 +163,12 @@ def validate_hypothesis(
     is_correct = offender_id is not None and hypothesis.suspect_id == offender_id
 
     claim_support = support_for_claims(
-        presentation, hypothesis.evidence_ids, hypothesis.suspect_id, hypothesis.claims
+        presentation,
+        hypothesis.evidence_ids,
+        hypothesis.suspect_id,
+        hypothesis.claims,
+        truth=truth,
+        state=state,
     )
     supports = list(claim_support.supports)
     missing = list(claim_support.missing)

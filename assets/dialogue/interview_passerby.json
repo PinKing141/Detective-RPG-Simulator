@@ -1,0 +1,33 @@
+{
+  "graph": {
+    "root": "START",
+    "nodes": [
+      {
+        "id": "START",
+        "text": "",
+        "choices": [
+          {"text": "Ask who was around", "leads_to": "BASELINE_PRESENCE", "tags": ["baseline", "presence"]},
+          {"text": "Ask about the time window", "leads_to": "BASELINE_TIMING", "tags": ["baseline", "opportunity", "timeline"]},
+          {"text": "Ask about prior contact", "leads_to": "BASELINE_RELATION", "tags": ["baseline", "relationship"]},
+          {"text": "Press the contradiction", "leads_to": "PRESSURE_CONTRADICTION", "tags": ["pressure", "contradiction"]},
+          {"text": "Pin down the exact location", "leads_to": "PRESSURE_LOCATION", "tags": ["pressure", "location"]},
+          {"text": "Frame it as the victim bringing trouble", "leads_to": "THEME_BLAME", "tags": ["theme", "theme:blame_victim", "blame_victim"]},
+          {"text": "Frame it as pressure and circumstance", "leads_to": "THEME_CIRCUMSTANCE", "tags": ["theme", "theme:circumstance", "circumstance"]},
+          {"text": "Frame it as someone trying to protect something", "leads_to": "THEME_ALTRUISTIC", "tags": ["theme", "theme:altruistic", "altruistic"]},
+          {"text": "Frame it as something that got out of hand", "leads_to": "THEME_ACCIDENTAL", "tags": ["theme", "theme:accidental", "accidental"]}
+        ]
+      },
+      {"id": "BASELINE_PRESENCE", "text": "I was just moving through, but even from a stranger's distance the shape near {place} looked wrong for the hour."},
+      {"id": "BASELINE_TIMING", "text": "{time_phrase}. I checked because I was heading somewhere else and trying not to miss it."},
+      {"id": "BASELINE_RELATION", "text": "No prior contact. I am a witness by accident, not biography."},
+      {"id": "PRESSURE_CONTRADICTION", "text": "You are pressing a passerby like I had front-row seats. I had a sidewalk and a second to decide whether to keep moving."},
+      {"id": "PRESSURE_LOCATION", "text": "Exact location? On the edge of my route, where a normal walk started feeling like somebody else's scene."},
+      {"id": "THEME_BLAME", "text": "From the outside, every bad night looks like someone should have seen it coming. That does not mean they did."},
+      {"id": "THEME_CIRCUMSTANCE", "text": "Circumstance is all a passerby has: a bad angle, a bad moment, and the sense that pressure got there first."},
+      {"id": "THEME_ALTRUISTIC", "text": "Maybe someone thought they were helping. From the sidewalk, noble and selfish wear the same coat."},
+      {"id": "THEME_ACCIDENTAL", "text": "Accident is believable from a distance right up until you remember somebody stayed long enough to make choices afterward.", "choices": [{"text": "Ask whether it looked sudden", "leads_to": "THEME_ACCIDENTAL_SUDDEN", "tags": ["theme", "theme:accidental", "accidental"]}, {"text": "Ask whether someone tried to fix it after", "leads_to": "THEME_ACCIDENTAL_AFTER", "tags": ["theme", "theme:accidental", "accidental"]}]},
+      {"id": "THEME_ACCIDENTAL_SUDDEN", "text": "Sudden from where I stood, yes. That does not mean the whole story was."},
+      {"id": "THEME_ACCIDENTAL_AFTER", "text": "That is exactly what it looked like. The aftermath had intent even if the start did not."}
+    ]
+  }
+}

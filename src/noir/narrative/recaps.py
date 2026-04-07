@@ -8,6 +8,7 @@ from typing import Iterable
 from noir.util.rng import Rng
 from noir.world.state import CaseRecord, EpisodeTitleState, WorldState
 from noir.narrative.grammar import normalize_line, normalize_lines, place_with_article
+from noir.narrative.styles import build_noir_phrase, build_partner_phrase
 
 
 @dataclass(frozen=True)
@@ -246,7 +247,11 @@ def build_cold_open(rng: Rng, location_name: str) -> list[str]:
     templates = list(_COLD_OPEN_TEMPLATES)
     rng.shuffle(templates)
     place = place_with_article(location_name)
-    return normalize_lines([templates[0].format(place=place)])
+    lines = [templates[0].format(place=place)]
+    phrase = build_noir_phrase(rng.fork("cold-open-style"))
+    if phrase:
+        lines.append(phrase)
+    return normalize_lines(lines)
 
 
 def build_end_tag(rng: Rng, outcome: str) -> list[str]:
@@ -277,4 +282,7 @@ def build_previously_on(world: WorldState, limit: int = 4) -> list[str]:
 def build_partner_line(rng: Rng, chance: float = 0.6) -> list[str]:
     if rng.random() > chance:
         return []
+    phrase = build_partner_phrase(rng.fork("partner-style"))
+    if phrase:
+        return normalize_lines([phrase])
     return normalize_lines([rng.choice(_PARTNER_LINES)])

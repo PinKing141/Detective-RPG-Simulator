@@ -1,0 +1,49 @@
+{
+  "graph": {
+    "root": "START",
+    "nodes": [
+      {
+        "id": "START",
+        "text": "",
+        "choices": [
+          {"text": "Ask who was around", "leads_to": "BASELINE_PRESENCE", "tags": ["baseline", "presence"]},
+          {"text": "Ask about the time window", "leads_to": "BASELINE_TIMING", "tags": ["baseline", "opportunity", "timeline"]},
+          {"text": "Ask about prior contact", "leads_to": "BASELINE_RELATION", "tags": ["baseline", "relationship"]},
+          {"text": "Press the contradiction", "leads_to": "PRESSURE_CONTRADICTION", "tags": ["pressure", "contradiction"]},
+          {"text": "Pin down the exact location", "leads_to": "PRESSURE_LOCATION", "tags": ["pressure", "location"]},
+          {"text": "Frame it as the victim bringing trouble", "leads_to": "THEME_BLAME", "tags": ["theme", "theme:blame_victim", "blame_victim"]},
+          {"text": "Frame it as pressure and circumstance", "leads_to": "THEME_CIRCUMSTANCE", "tags": ["theme", "theme:circumstance", "circumstance"]},
+          {"text": "Frame it as someone trying to protect something", "leads_to": "THEME_ALTRUISTIC", "tags": ["theme", "theme:altruistic", "altruistic"]},
+          {"text": "Frame it as something that got out of hand", "leads_to": "THEME_ACCIDENTAL", "tags": ["theme", "theme:accidental", "accidental"]}
+        ]
+      },
+      {"id": "BASELINE_PRESENCE", "text": "I keep watch because everybody else on this block minds their curtains. I saw movement near {place}, and {suspect} is the face that keeps floating back up.", "choices": [{"text": "Ask whether anyone else was there", "leads_to": "BASELINE_PRESENCE_COMPANY", "tags": ["baseline"]}, {"text": "Ask what made the figure stand out", "leads_to": "BASELINE_PRESENCE_DETAIL", "tags": ["baseline"]}]},
+      {"id": "BASELINE_PRESENCE_COMPANY", "text": "Could have been somebody else in the spill of shadows, but if there was company they stayed behind the kind of angle neighbors learn not to stare at."},
+      {"id": "BASELINE_PRESENCE_DETAIL", "text": "It was the hesitation. People who belong somewhere knock or hurry. This one paused like the building owed them an answer."},
+      {"id": "BASELINE_TIMING", "text": "It was {time_phrase}. I remember because the pipes had just stopped banging and the street had gone thin enough for little sounds to matter.", "choices": [{"text": "Ask what happened just before", "leads_to": "BASELINE_TIMING_BEFORE", "tags": ["baseline"]}, {"text": "Ask what happened just after", "leads_to": "BASELINE_TIMING_AFTER", "tags": ["baseline"]}]},
+      {"id": "BASELINE_TIMING_BEFORE", "text": "Before that, the block was ordinary in the sad way it usually is. Then the quiet changed shape around {place}."},
+      {"id": "BASELINE_TIMING_AFTER", "text": "Afterward there was a stretch of stillness so deliberate it bothered me more than any shout would have."},
+      {"id": "BASELINE_RELATION", "text": "Neighborhoods keep a soft ledger. I knew {suspect} the way you know a car that circles too often or a tenant who never waves first.", "choices": [{"text": "Ask whether they ever spoke", "leads_to": "BASELINE_RELATION_TALK", "tags": ["baseline"]}, {"text": "Ask whether the witness trusted them", "leads_to": "BASELINE_RELATION_TRUST", "tags": ["baseline"]}]},
+      {"id": "BASELINE_RELATION_TALK", "text": "Only the small civics of living close together. A nod on the stairs. A look that says 'mind your own walls.'"},
+      {"id": "BASELINE_RELATION_TRUST", "text": "Trust is too expensive for apartment living. I knew how much hallway to give them. That is different."},
+      {"id": "PRESSURE_CONTRADICTION", "text": "You want the block to behave like a stopwatch. It behaves like a hallway. Sounds slip, doors muffle, and memory takes whatever shape fits rent and nerves.", "choices": [{"text": "Tell them the times do not match", "leads_to": "PRESSURE_CONTRADICTION_CRACK", "tags": ["pressure"]}, {"text": "Tell them they are withholding the useful part", "leads_to": "PRESSURE_CONTRADICTION_DIGIN", "tags": ["pressure"]}]},
+      {"id": "PRESSURE_CONTRADICTION_CRACK", "text": "All right. I rounded the time because I do not enjoy seeing my own name written into ugly nights. That does not make the night clean."},
+      {"id": "PRESSURE_CONTRADICTION_DIGIN", "text": "Useful to you is not the same thing as safe to me. Neighbors learn that before they learn each other's birthdays."},
+      {"id": "PRESSURE_LOCATION", "text": "You keep saying {place} like the building has one face. It has front steps, side gates, blind corners, and a dozen places where a witness becomes a rumor.", "choices": [{"text": "Ask for the doorway or side of the building", "leads_to": "PRESSURE_LOCATION_EDGE", "tags": ["pressure"]}, {"text": "Ask what the witness could actually see", "leads_to": "PRESSURE_LOCATION_SIGHT", "tags": ["pressure"]}]},
+      {"id": "PRESSURE_LOCATION_EDGE", "text": "Closer to the side where tenants cut through when they do not want company. That is the best map I can give you."},
+      {"id": "PRESSURE_LOCATION_SIGHT", "text": "Enough to know the movement was wrong for the hour. Not enough to pretend the dark signed an affidavit for me."},
+      {"id": "THEME_BLAME", "text": "Blocks like this collect bad habits and call it atmosphere. By the time trouble shows its face, half the damage has already rented a room upstairs.", "choices": [{"text": "Ask whether the victim invited the danger", "leads_to": "THEME_BLAME_HARD", "tags": ["theme", "theme:blame_victim", "blame_victim"]}, {"text": "Ask whether the witness is shifting blame", "leads_to": "THEME_BLAME_SOFT", "tags": ["theme", "theme:blame_victim", "blame_victim"]}]},
+      {"id": "THEME_BLAME_HARD", "text": "I am saying people keep strange company, prop open bad doors, and act shocked when the building remembers."},
+      {"id": "THEME_BLAME_SOFT", "text": "Maybe. But if a place keeps warning you with little failures and you ignore them, the final one lands harder."},
+      {"id": "THEME_CIRCUMSTANCE", "text": "Pressure leaks through walls before blood does. You hear it in arguments, missed payments, and the way folks stop making eye contact in the stairwell.", "choices": [{"text": "Ask what pressure was building", "leads_to": "THEME_CIRCUMSTANCE_PRESSURE", "tags": ["theme", "theme:circumstance", "circumstance"]}, {"text": "Ask whether the witness is excusing it", "leads_to": "THEME_CIRCUMSTANCE_EXCUSE", "tags": ["theme", "theme:circumstance", "circumstance"]}]},
+      {"id": "THEME_CIRCUMSTANCE_PRESSURE", "text": "Money. Shame. People sleeping one thin wall away from decisions they cannot afford. That kind of pressure warps a whole building."},
+      {"id": "THEME_CIRCUMSTANCE_EXCUSE", "text": "No. I am saying the hallways were already bent before the night finally snapped them."},
+      {"id": "THEME_ALTRUISTIC", "text": "Everybody in a building like this claims they are covering for somebody. A child. A parent. A lover. Usually they are just trying to survive the mirror.", "choices": [{"text": "Ask who was supposed to be protected", "leads_to": "THEME_ALTRUISTIC_TARGET", "tags": ["theme", "theme:altruistic", "altruistic"]}, {"text": "Ask whether that story sounds convenient", "leads_to": "THEME_ALTRUISTIC_CONVENIENT", "tags": ["theme", "theme:altruistic", "altruistic"]}]},
+      {"id": "THEME_ALTRUISTIC_TARGET", "text": "Whoever lives one floor above the consequences. That is the usual answer."},
+      {"id": "THEME_ALTRUISTIC_CONVENIENT", "text": "Convenient, sure. Still, people do ugly things under the banner of keeping worse things out of the apartment."},
+      {"id": "THEME_ACCIDENTAL", "text": "Accidents in close quarters still leave planning in the cleanup. Walls remember where panic stopped and decision started.", "choices": [{"text": "Ask whether it looked sudden", "leads_to": "THEME_ACCIDENTAL_SUDDEN", "tags": ["theme", "theme:accidental", "accidental"]}, {"text": "Ask whether someone tried to fix it after", "leads_to": "THEME_ACCIDENTAL_AFTER", "tags": ["theme", "theme:accidental", "accidental"]}]},
+      {"id": "THEME_ACCIDENTAL_SUDDEN", "text": "Sudden, maybe. But not brief. Something in the building stayed tense too long after the first wrong note."},
+      {"id": "THEME_ACCIDENTAL_AFTER", "text": "That is the part I believe. Somebody kept moving around after the damage was done, like they thought furniture and silence could rescue them."}
+    ]
+  }
+}

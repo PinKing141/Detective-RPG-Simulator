@@ -10,6 +10,7 @@ from noir.domain.enums import EventKind, ItemType, RoleTag
 from noir.domain.models import Item, Location, Person
 from noir.locations.profiles import build_scene_layout, load_location_profiles
 from noir.naming import NamePick, load_name_generator
+from noir.nemesis.signature import apply_signature_to_truth
 from noir.nemesis.state import NemesisCasePlan
 from noir.truth.graph import TruthState
 from noir.util.rng import Rng
@@ -58,6 +59,53 @@ def _method_category(weapon_name: str) -> str:
     if "blunt" in lowered or "bat" in lowered or "hammer" in lowered:
         return "blunt"
     return "sharp"
+
+
+def _access_path_for_approach(
+    rng: Rng,
+    relationship_distance: str,
+    approach_style: str | None,
+) -> str:
+    if relationship_distance == "intimate":
+        return "trusted_contact"
+    if relationship_distance == "stranger":
+        if approach_style == "lure":
+            return "social_entry"
+        return "forced_entry"
+    if approach_style == "break_in":
+        return "forced_entry"
+    if approach_style == "ambush":
+        return "social_entry"
+    if approach_style == "lure":
+        return "trusted_contact"
+    return rng.choice(ACCESS_PATHS)
+
+
+def _primary_exit_time(crime_time: int, exit_style: str | None) -> int:
+    if exit_style == "vehicle":
+        return crime_time
+    if exit_style == "misdirection":
+        return crime_time + 2
+    if exit_style == "walkaway":
+        return crime_time + 2
+    return crime_time + 1
+
+
+def _escape_plan(
+    location_entries: list[dict],
+    crime_time: int,
+    exit_style: str | None,
+) -> tuple[UUID | None, int | None, int | None]:
+    if exit_style not in {"vehicle", "misdirection"}:
+        return None, None, None
+    secondary_entries = [entry for entry in location_entries if entry.get("role") != "primary"]
+    if not secondary_entries:
+        return None, None, None
+    target = secondary_entries[0]
+    location_id = UUID(str(target["location_id"]))
+    entry_time = crime_time + 1
+    exit_time = crime_time + (3 if exit_style == "misdirection" else 2)
+    return location_id, entry_time, exit_time
 
 
 def _pick_closeness(rng: Rng, weights: tuple[float, float, float]) -> str:
@@ -422,23 +470,48 @@ def generate_case(
     if witnesses:
         contradiction_witness = rng.fork("contradiction").choice(witnesses)
 
+    component_values = dict(nemesis_plan.component_values) if nemesis_plan else {}
+    approach_style = component_values.get("approach") or ""
+    control_style = component_values.get("control") or ""
+    cleanup_style = component_values.get("cleanup") or ""
+    exit_style = component_values.get("exit") or ""
+
     truth.set_location(victim.id, crime_scene.id, entry_time=crime_time - 1, exit_time=crime_time + 1)
-    truth.set_location(offender.id, crime_scene.id, entry_time=crime_time - 1, exit_time=crime_time + 1)
+    offender_exit_time = _primary_exit_time(crime_time, exit_style)
+    truth.set_location(
+        offender.id,
+        crime_scene.id,
+        entry_time=crime_time - 1,
+        exit_time=offender_exit_time,
+    )
     for scene_witness in witnesses:
         truth.set_location(
             scene_witness.id, crime_scene.id, entry_time=crime_time - 2, exit_time=crime_time
         )
 
+    escape_location_id, escape_entry_time, escape_exit_time = _escape_plan(
+        location_entries,
+        crime_time,
+        exit_style,
+    )
+    if escape_location_id and escape_entry_time is not None and escape_exit_time is not None:
+        truth.set_location(
+            offender.id,
+            escape_location_id,
+            entry_time=escape_entry_time,
+            exit_time=escape_exit_time,
+        )
+
     truth.possess(offender.id, weapon.id, start_time=crime_time - 2, end_time=crime_time)
 
-    access_path = rng.choice(ACCESS_PATHS)
+    access_path = _access_path_for_approach(rng, relationship_distance, approach_style)
     motive = rng.choice(MOTIVES)
     if relationship_distance == "intimate":
         motive = rng.choice(["revenge", "obsession", "concealment"])
         access_path = "trusted_contact"
     elif relationship_distance == "stranger":
         motive = rng.choice(["thrill", "money"])
-        access_path = "forced_entry"
+        access_path = _access_path_for_approach(rng, relationship_distance, approach_style)
 
     truth.record_event(
         kind=EventKind.APPROACH,
@@ -449,6 +522,18 @@ def generate_case(
             "method": weapon.name,
             "method_category": method_category,
             "access_path": access_path,
+            "approach_style": approach_style,
+        },
+    )
+    truth.record_event(
+        kind=EventKind.CONFRONTATION,
+        timestamp=crime_time,
+        location_id=crime_scene.id,
+        participants=[offender.id, victim.id],
+        metadata={
+            "control_style": control_style,
+            "access_path": access_path,
+            "approach_style": approach_style,
         },
     )
     kill_event = truth.record_event(
@@ -461,6 +546,9 @@ def generate_case(
             "method_category": method_category,
             "weapon_id": str(weapon.id),
             "motive_category": motive,
+            "control_style": control_style,
+            "cleanup_style": cleanup_style,
+            "exit_style": exit_style,
         },
     )
     truth.record_event(
@@ -468,9 +556,18 @@ def generate_case(
         timestamp=discovery_time,
         location_id=crime_scene.id,
         participants=[witnesses[0].id],
-        metadata={"found_victim_id": str(victim.id)},
+        metadata={
+            "found_victim_id": str(victim.id),
+            "cleanup_style": cleanup_style,
+        },
     )
     truth.link_causal(kill_event.id, weapon.id)
+    if world and world.nemesis_state and nemesis_plan and nemesis_plan.is_nemesis_case:
+        apply_signature_to_truth(
+            truth,
+            world.nemesis_state.profile,
+            rng.fork(f"signature:{case_id}"),
+        )
 
     truth.case_meta.update(
         {
@@ -484,6 +581,10 @@ def generate_case(
             "witness_offender_closeness": witness_offender_closeness,
             "offender_victim_relationship": offender_victim_relation,
             "access_path": access_path,
+            "approach_style": approach_style,
+            "control_style": control_style,
+            "cleanup_style": cleanup_style,
+            "exit_style": exit_style,
             "motive_category": motive,
             "location_name": crime_scene.name,
             "method_category": method_category,
@@ -508,6 +609,8 @@ def generate_case(
             "nemesis_visibility": nemesis_visibility,
             "nemesis_degraded": nemesis_degraded,
             "nemesis_tone": nemesis_tone or "",
+            "nemesis_components": component_values,
+            "escape_location_id": str(escape_location_id) if escape_location_id else "",
         }
     )
 
@@ -545,5 +648,10 @@ def generate_case(
         "nemesis_method": truth.case_meta.get("nemesis_method", ""),
         "nemesis_visibility": truth.case_meta.get("nemesis_visibility", 1),
         "nemesis_degraded": truth.case_meta.get("nemesis_degraded", False),
+        "nemesis_components": dict(truth.case_meta.get("nemesis_components", {})),
+        "approach_style": truth.case_meta.get("approach_style", ""),
+        "control_style": truth.case_meta.get("control_style", ""),
+        "cleanup_style": truth.case_meta.get("cleanup_style", ""),
+        "exit_style": truth.case_meta.get("exit_style", ""),
     }
     return truth, case_facts

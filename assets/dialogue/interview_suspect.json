@@ -1,0 +1,49 @@
+{
+  "graph": {
+    "root": "START",
+    "nodes": [
+      {
+        "id": "START",
+        "text": "",
+        "choices": [
+          {"text": "Ask who was around", "leads_to": "BASELINE_PRESENCE", "tags": ["baseline", "presence"]},
+          {"text": "Ask about the time window", "leads_to": "BASELINE_TIMING", "tags": ["baseline", "opportunity", "timeline"]},
+          {"text": "Ask about prior contact", "leads_to": "BASELINE_RELATION", "tags": ["baseline", "relationship"]},
+          {"text": "Press the contradiction", "leads_to": "PRESSURE_CONTRADICTION", "tags": ["pressure", "contradiction"]},
+          {"text": "Pin down the exact location", "leads_to": "PRESSURE_LOCATION", "tags": ["pressure", "location"]},
+          {"text": "Frame it as the victim bringing trouble", "leads_to": "THEME_BLAME", "tags": ["theme", "theme:blame_victim", "blame_victim"]},
+          {"text": "Frame it as pressure and circumstance", "leads_to": "THEME_CIRCUMSTANCE", "tags": ["theme", "theme:circumstance", "circumstance"]},
+          {"text": "Frame it as someone trying to protect something", "leads_to": "THEME_ALTRUISTIC", "tags": ["theme", "theme:altruistic", "altruistic"]},
+          {"text": "Frame it as something that got out of hand", "leads_to": "THEME_ACCIDENTAL", "tags": ["theme", "theme:accidental", "accidental"]}
+        ]
+      },
+      {"id": "BASELINE_PRESENCE", "text": "If you are asking whether I was near {place}, plenty of people were near {place}. It is a location, not a private chapel.", "choices": [{"text": "Ask whether anyone else was there", "leads_to": "BASELINE_PRESENCE_COMPANY", "tags": ["baseline"]}, {"text": "Ask what made the figure stand out", "leads_to": "BASELINE_PRESENCE_DETAIL", "tags": ["baseline"]}]},
+      {"id": "BASELINE_PRESENCE_COMPANY", "text": "You want me to inventory the whole street now? I noticed movement. I did not conduct a census."},
+      {"id": "BASELINE_PRESENCE_DETAIL", "text": "Nothing dramatic. Just somebody moving like they had somewhere to be and did not want commentary on the way there."},
+      {"id": "BASELINE_TIMING", "text": "{time_phrase}, give or take the margin of error you people always pretend not to have.", "choices": [{"text": "Ask what happened just before", "leads_to": "BASELINE_TIMING_BEFORE", "tags": ["baseline"]}, {"text": "Ask what happened just after", "leads_to": "BASELINE_TIMING_AFTER", "tags": ["baseline"]}]},
+      {"id": "BASELINE_TIMING_BEFORE", "text": "Before that? Ordinary city noise, ordinary bad weather, ordinary people minding themselves."},
+      {"id": "BASELINE_TIMING_AFTER", "text": "After that, I left. That is usually what sensible people do when they suspect the night is turning stupid."},
+      {"id": "BASELINE_RELATION", "text": "I knew the victim well enough to recognize them and poorly enough not to build a shrine out of it.", "choices": [{"text": "Ask whether they ever spoke", "leads_to": "BASELINE_RELATION_TALK", "tags": ["baseline"]}, {"text": "Ask whether the witness trusted them", "leads_to": "BASELINE_RELATION_TRUST", "tags": ["baseline"]}]},
+      {"id": "BASELINE_RELATION_TALK", "text": "We spoke. Adults do that. It does not make every conversation a prelude."},
+      {"id": "BASELINE_RELATION_TRUST", "text": "Trust is an inflated word. We had an understanding of distance. That is all."},
+      {"id": "PRESSURE_CONTRADICTION", "text": "You say contradiction like it is a magic key. Usually it just means you have decided the answer before the question is done.", "choices": [{"text": "Tell them the times do not match", "leads_to": "PRESSURE_CONTRADICTION_CRACK", "tags": ["pressure"]}, {"text": "Tell them they are withholding the useful part", "leads_to": "PRESSURE_CONTRADICTION_DIGIN", "tags": ["pressure"]}]},
+      {"id": "PRESSURE_CONTRADICTION_CRACK", "text": "Then one of your sources is wrong. It happens. You people treat inconsistency like intent when sometimes it is just exhaustion."},
+      {"id": "PRESSURE_CONTRADICTION_DIGIN", "text": "What you call useful is usually the part that reads best in court after it has been stripped of context."},
+      {"id": "PRESSURE_LOCATION", "text": "Exact location? Near enough to notice, far enough not to owe anybody a play-by-play.", "choices": [{"text": "Ask for the doorway or side of the building", "leads_to": "PRESSURE_LOCATION_EDGE", "tags": ["pressure"]}, {"text": "Ask what the witness could actually see", "leads_to": "PRESSURE_LOCATION_SIGHT", "tags": ["pressure"]}]},
+      {"id": "PRESSURE_LOCATION_EDGE", "text": "The side with less foot traffic. You know the kind of place. Every city has ten of them per block."},
+      {"id": "PRESSURE_LOCATION_SIGHT", "text": "Enough to understand the atmosphere. Not enough to certify the scene for you."},
+      {"id": "THEME_BLAME", "text": "If you are asking whether the victim knew how to collect trouble, that is a different question from whether they deserved any of it.", "choices": [{"text": "Ask whether the victim invited the danger", "leads_to": "THEME_BLAME_HARD", "tags": ["theme", "theme:blame_victim", "blame_victim"]}, {"text": "Ask whether the witness is shifting blame", "leads_to": "THEME_BLAME_SOFT", "tags": ["theme", "theme:blame_victim", "blame_victim"]}]},
+      {"id": "THEME_BLAME_HARD", "text": "People choose risk every day. Sometimes the bill arrives late and everyone acts surprised by the due date."},
+      {"id": "THEME_BLAME_SOFT", "text": "I am saying the world was already unstable. If you hear accusation in that, maybe you brought it with you."},
+      {"id": "THEME_CIRCUMSTANCE", "text": "Circumstance is the usual accomplice. Thin money, thinner patience, somebody cornered by consequences they postponed too long.", "choices": [{"text": "Ask what pressure was building", "leads_to": "THEME_CIRCUMSTANCE_PRESSURE", "tags": ["theme", "theme:circumstance", "circumstance"]}, {"text": "Ask whether the witness is excusing it", "leads_to": "THEME_CIRCUMSTANCE_EXCUSE", "tags": ["theme", "theme:circumstance", "circumstance"]}]},
+      {"id": "THEME_CIRCUMSTANCE_PRESSURE", "text": "Pressure is rarely cinematic. It is usually rent, embarrassment, and one badly timed demand too many."},
+      {"id": "THEME_CIRCUMSTANCE_EXCUSE", "text": "No. I am describing a mechanism, not offering absolution."},
+      {"id": "THEME_ALTRUISTIC", "text": "People do ugly things for reasons they insist are noble. Sometimes they even believe themselves.", "choices": [{"text": "Ask who was supposed to be protected", "leads_to": "THEME_ALTRUISTIC_TARGET", "tags": ["theme", "theme:altruistic", "altruistic"]}, {"text": "Ask whether that story sounds convenient", "leads_to": "THEME_ALTRUISTIC_CONVENIENT", "tags": ["theme", "theme:altruistic", "altruistic"]}]},
+      {"id": "THEME_ALTRUISTIC_TARGET", "text": "Usually somebody adjacent. Family, reputation, leverage. Pick your favorite idol."},
+      {"id": "THEME_ALTRUISTIC_CONVENIENT", "text": "Convenient enough to survive first contact with guilt. Not always convenient enough to survive daylight."},
+      {"id": "THEME_ACCIDENTAL", "text": "Accidental is a word people reach for when intent would sound expensive. It explains the first second, not always the next ten.", "choices": [{"text": "Ask whether it looked sudden", "leads_to": "THEME_ACCIDENTAL_SUDDEN", "tags": ["theme", "theme:accidental", "accidental"]}, {"text": "Ask whether someone tried to fix it after", "leads_to": "THEME_ACCIDENTAL_AFTER", "tags": ["theme", "theme:accidental", "accidental"]}]},
+      {"id": "THEME_ACCIDENTAL_SUDDEN", "text": "Sudden? Possibly. Unthinking? No. People start thinking very hard the second consequences get blood on them."},
+      {"id": "THEME_ACCIDENTAL_AFTER", "text": "That would not surprise me. Most panic spends itself cleaning, arranging, or rehearsing."}
+    ]
+  }
+}

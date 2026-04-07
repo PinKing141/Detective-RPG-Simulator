@@ -7,6 +7,7 @@ from typing import Iterable
 from uuid import UUID
 
 from noir.deduction.board import ClaimType
+from noir.profiling.profile import ProfileDrive, ProfileMobility, ProfileOrganization
 from noir.presentation.evidence import CCTVReport, EvidenceItem, ForensicsResult, WitnessStatement
 
 
@@ -65,6 +66,8 @@ def support_for_claims(
     evidence_ids: Iterable[UUID],
     suspect_id: UUID | None,
     claims: Iterable[ClaimType],
+    truth=None,
+    state=None,
 ) -> EvidenceSupport:
     support = EvidenceSupport()
     if suspect_id is None:
@@ -94,9 +97,47 @@ def support_for_claims(
             support.missing.append("No evidence constrains an opportunity window.")
 
     if ClaimType.MOTIVE in claim_set:
-        support.missing.append("No evidence suggests a motive linked to the victim.")
+        if _motive_supported(truth, state, known):
+            support.supports.append("Working profile aligns with the case motive.")
+        else:
+            support.missing.append("No supported motive read ties the suspect to the victim.")
 
     if ClaimType.BEHAVIOR in claim_set:
-        support.missing.append("No evidence suggests behavioral alignment.")
+        if _behavior_supported(state, known):
+            support.supports.append("Working profile aligns with the behavior suggested by the evidence.")
+        else:
+            support.missing.append("No supported behavioral read is anchored to the selected evidence.")
 
     return support
+
+
+def _motive_supported(truth, state, known: list[EvidenceItem]) -> bool:
+    if truth is None or state is None or state.profile is None:
+        return False
+    drive = state.profile.drive
+    if drive == ProfileDrive.UNKNOWN:
+        return False
+    motive = str(getattr(truth, "case_meta", {}).get("motive_category", "") or "")
+    if not motive:
+        return False
+    drive_map = {
+        "money": {ProfileDrive.MISSION},
+        "concealment": {ProfileDrive.MISSION, ProfileDrive.POWER_CONTROL},
+        "revenge": {ProfileDrive.POWER_CONTROL},
+        "obsession": {ProfileDrive.POWER_CONTROL, ProfileDrive.VISIONARY},
+        "thrill": {ProfileDrive.HEDONISTIC},
+    }
+    if drive not in drive_map.get(motive, set()):
+        return False
+    return bool(set(state.profile.evidence_ids).intersection(item.id for item in known))
+
+
+def _behavior_supported(state, known: list[EvidenceItem]) -> bool:
+    if state is None or state.profile is None:
+        return False
+    profile = state.profile
+    supported_ids = set(profile.evidence_ids).intersection(item.id for item in known)
+    if not supported_ids:
+        return False
+    has_behavior = profile.organization != ProfileOrganization.UNKNOWN or profile.mobility != ProfileMobility.UNKNOWN
+    return has_behavior

@@ -173,6 +173,13 @@ def _pattern_plan(truth: TruthState) -> dict[str, Any] | None:
     return None
 
 
+def _signature_meta(truth: TruthState) -> dict[str, str] | None:
+    value = truth.case_meta.get("nemesis_signature")
+    if isinstance(value, dict):
+        return {str(key): str(item) for key, item in value.items()}
+    return None
+
+
 def _article_for(value: str) -> str:
     if not value:
         return "A"
@@ -284,6 +291,52 @@ def _wound_class(method_category: str) -> str:
     return "incision"
 
 
+def _control_statement(
+    control_style: str,
+    confidence: ConfidenceBand,
+    place: str,
+    offender_name: str | None,
+    observed: bool,
+) -> str:
+    heard_prefix = "I think I heard" if confidence == ConfidenceBand.WEAK else "I heard"
+    saw_prefix = "I think I saw" if confidence == ConfidenceBand.WEAK else "I saw"
+    if observed and offender_name:
+        if control_style == "restraints":
+            return f"{saw_prefix} {offender_name} keeping close control of someone outside {place}."
+        if control_style == "surprise":
+            return f"{saw_prefix} {offender_name} closing in fast outside {place}."
+        if control_style == "intimidation":
+            return f"{saw_prefix} {offender_name} cornering someone outside {place}."
+        return f"{saw_prefix} {offender_name} outside {place}."
+    if control_style == "restraints":
+        return f"{heard_prefix} a struggle that sounded pinned down near {place}."
+    if control_style == "surprise":
+        return f"{heard_prefix} one sharp burst of struggle near {place}."
+    if control_style == "intimidation":
+        return f"{heard_prefix} a low voice pressing hard before the noise stopped near {place}."
+    return f"{heard_prefix} a struggle near {place}."
+
+
+def _control_wound_observation(method_category: str, control_style: str) -> str | None:
+    if control_style == "restraints":
+        return "Secondary bruising around the arms suggests the victim was restrained or pinned before the fatal injury."
+    if control_style == "surprise":
+        return "Defensive trauma appears limited, suggesting the victim had little warning before the fatal injury."
+    if control_style == "intimidation":
+        if method_category == "poison":
+            return "Associated bruising suggests coercive force was used to control the victim before death."
+        return "Bruising around the upper arms and jaw suggests coercive force before the fatal injury."
+    return None
+
+
+def _control_uncertainty_hooks(control_style: str) -> list[str]:
+    if control_style == "intimidation":
+        return ["Witness account carries signs of fear or hesitation."]
+    if control_style == "surprise":
+        return ["Event seems to have unfolded quickly."]
+    return []
+
+
 def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
     evidence: List = []
 
@@ -376,6 +429,10 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
     competence = _float_trait(offender, "competence", 0.5)
     risk_tolerance = _float_trait(offender, "risk_tolerance", 0.5)
     access_path = truth.case_meta.get("access_path", "")
+    approach_style = str(truth.case_meta.get("approach_style", "") or "")
+    control_style = str(truth.case_meta.get("control_style", "") or "")
+    cleanup_style = str(truth.case_meta.get("cleanup_style", "") or "")
+    exit_style = str(truth.case_meta.get("exit_style", "") or "")
     method_category = "sharp"
     if kill_event.metadata and "method_category" in kill_event.metadata:
         method_category = str(kill_event.metadata.get("method_category"))
@@ -400,6 +457,8 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
             confidence = confidence_from_window(time_window)
             if presence < 0.25 or visibility_score < 0.35:
                 confidence = _downgrade(confidence)
+            if control_style == "intimidation":
+                confidence = _downgrade(confidence)
             observed_person_ids = []
             if offender and presence >= 0.25:
                 see_chance = presence * visibility_score
@@ -407,17 +466,31 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                     see_chance += 0.1
                 if risk_tolerance >= 0.6:
                     see_chance += 0.1
+                if control_style == "restraints":
+                    see_chance += 0.07
+                elif control_style == "surprise":
+                    see_chance -= 0.1
+                elif control_style == "intimidation":
+                    see_chance -= 0.03
+                if exit_style == "walkaway":
+                    see_chance += 0.12
+                elif exit_style == "vehicle":
+                    see_chance -= 0.05
+                elif exit_style == "misdirection":
+                    see_chance -= 0.08
                 if cctv_available:
                     see_chance -= 0.1
                 if witness_rng.random() < _clamp(see_chance, 0.1, 0.85):
                     observed_person_ids.append(offender.id)
             location_name = location.name if location else "building"
             place = place_with_article(location_name)
-            heard_prefix = "I think I heard" if confidence == ConfidenceBand.WEAK else "I heard"
-            saw_prefix = "I think I saw" if confidence == ConfidenceBand.WEAK else "I saw"
-            statement = f"{heard_prefix} a struggle near {place}."
-            if offender and observed_person_ids:
-                statement = f"{saw_prefix} {offender.name} outside {place}."
+            statement = _control_statement(
+                control_style,
+                confidence,
+                place,
+                offender.name if offender else None,
+                bool(offender and observed_person_ids),
+            )
             evidence.append(
                 WitnessStatement(
                     evidence_type=EvidenceType.TESTIMONIAL,
@@ -430,10 +503,17 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                     reported_time_window=time_window,
                     location_id=kill_event.location_id,
                     observed_person_ids=observed_person_ids,
+                    uncertainty_hooks=_control_uncertainty_hooks(control_style),
                 )
             )
 
     cctv_omit = _clamp(0.6 - (risk_tolerance * 0.4), 0.1, 0.7)
+    if exit_style == "vehicle":
+        cctv_omit = _clamp(cctv_omit - 0.2, 0.05, 0.7)
+    elif exit_style == "misdirection":
+        cctv_omit = _clamp(cctv_omit + 0.1, 0.1, 0.85)
+    if cleanup_style == "arson":
+        cctv_omit = _clamp(cctv_omit + 0.1, 0.1, 0.85)
     cctv_added = False
     if cctv_available and not maybe_omit(cctv_omit, rng):
         evidence.append(
@@ -505,6 +585,18 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
     forensics_added = False
     for item in weapon_items:
         forensics_omit = _clamp(0.1 + (competence * 0.6), 0.1, 0.8)
+        if control_style == "restraints":
+            forensics_omit = _clamp(forensics_omit - 0.1, 0.05, 0.8)
+        elif control_style == "surprise":
+            forensics_omit = _clamp(forensics_omit + 0.05, 0.1, 0.85)
+        elif control_style == "intimidation":
+            forensics_omit = _clamp(forensics_omit - 0.02, 0.08, 0.8)
+        if cleanup_style == "wipe":
+            forensics_omit = _clamp(forensics_omit + 0.15, 0.1, 0.9)
+        elif cleanup_style == "arson":
+            forensics_omit = _clamp(forensics_omit + 0.2, 0.1, 0.95)
+        elif cleanup_style == "staging":
+            forensics_omit = _clamp(forensics_omit - 0.05, 0.05, 0.8)
         if maybe_omit(forensics_omit, rng):
             continue
         method_category = _method_category_from_item(item.name)
@@ -565,6 +657,9 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
             observation = "Irregular tearing and tissue bridging suggest blunt trauma."
         else:
             observation = "Clean margins suggest a sharp instrument."
+        control_wound = _control_wound_observation(method_category, control_style)
+        if control_wound:
+            observation = f"{observation} {control_wound}"
         evidence.append(
             ForensicObservation(
                 evidence_type=EvidenceType.FORENSICS,
@@ -578,6 +673,45 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 location_id=primary_location_id,
             )
         )
+        if control_style == "restraints":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (control)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.MEDIUM,
+                    poi_id=wound_poi_id or primary_poi_id,
+                    observation="Pressure marks and displaced fabric suggest restraint or pinning during the attack.",
+                    location_id=primary_location_id,
+                )
+            )
+        elif control_style == "surprise":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (control)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=wound_poi_id or primary_poi_id,
+                    observation="The scene suggests the victim had little chance to react before the attack escalated.",
+                    location_id=primary_location_id,
+                )
+            )
+        elif control_style == "intimidation":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (control)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=wound_poi_id or primary_poi_id,
+                    observation="Bruising and scene disruption suggest coercive force was used to dominate the encounter.",
+                    location_id=primary_location_id,
+                )
+            )
         entry_confidence = ConfidenceBand.MEDIUM
         if competence >= 0.7:
             entry_confidence = ConfidenceBand.WEAK
@@ -587,6 +721,10 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
             entry_observation = "No clear signs of forced entry; access may have been granted."
         else:
             entry_observation = "Entry appears routine; no immediate signs of force."
+        if approach_style == "lure" and access_path != "forced_entry":
+            entry_observation = "No clear signs of forced entry; the victim may have been drawn into routine contact."
+        elif approach_style == "ambush" and access_path != "forced_entry":
+            entry_observation = "No clear signs of forced entry; timing and surprise may have mattered more than force."
         evidence.append(
             ForensicObservation(
                 evidence_type=EvidenceType.FORENSICS,
@@ -599,6 +737,84 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 location_id=primary_location_id,
             )
         )
+        if cleanup_style == "wipe":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (cleanup)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=entry_poi_id or primary_poi_id,
+                    observation="Several touched surfaces look recently wiped down.",
+                    location_id=primary_location_id,
+                )
+            )
+        elif cleanup_style == "staging":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (cleanup)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.MEDIUM,
+                    poi_id=body_poi_id or primary_poi_id,
+                    observation="Body position and nearby objects appear deliberately arranged after the attack.",
+                    location_id=primary_location_id,
+                )
+            )
+        elif cleanup_style == "arson":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (cleanup)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=body_poi_id or primary_poi_id,
+                    observation="Heat damage and soot obscure parts of the scene.",
+                    location_id=primary_location_id,
+                )
+            )
+        if exit_style == "vehicle":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (exit)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=entry_poi_id or primary_poi_id,
+                    observation="Departure traces suggest a rapid vehicle exit from the scene.",
+                    location_id=primary_location_id,
+                )
+            )
+        elif exit_style == "misdirection":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (exit)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=entry_poi_id or primary_poi_id,
+                    observation="Overlapping movement cues suggest the exit path was meant to confuse direction of travel.",
+                    location_id=primary_location_id,
+                )
+            )
+        elif exit_style == "walkaway":
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (exit)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=ConfidenceBand.WEAK,
+                    poi_id=entry_poi_id or primary_poi_id,
+                    observation="Departure traces suggest the offender left on foot and stayed exposed longer than necessary.",
+                    location_id=primary_location_id,
+                )
+            )
 
         extra_pois = [poi_id for poi_id in non_body_poi_ids if poi_id != entry_poi_id]
         extra_notes = [
@@ -698,6 +914,31 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                 )
             )
 
+        signature_meta = _signature_meta(truth)
+        if signature_meta:
+            token = signature_meta.get("token", "detail")
+            staging = signature_meta.get("staging", "placed")
+            message = signature_meta.get("message", "")
+            placement = signature_meta.get("placement_hint", "at the scene")
+            confidence = ConfidenceBand.MEDIUM
+            if cleanup_style == "arson":
+                confidence = ConfidenceBand.WEAK
+            text = f"A {token} is left {staging}, {placement}."
+            if message and message != "silent":
+                text = f"{text} A message reads: {message}"
+            evidence.append(
+                ForensicObservation(
+                    evidence_type=EvidenceType.FORENSICS,
+                    summary="Forensic observation (signature)",
+                    source="Scene Unit",
+                    time_collected=kill_event.timestamp + 1,
+                    confidence=confidence,
+                    poi_id=body_poi_id or entry_poi_id or primary_poi_id,
+                    observation=text,
+                    location_id=primary_location_id,
+                )
+            )
+
         pattern_plan = _pattern_plan(truth)
         if pattern_plan and pattern_plan.get("pattern_type") != "none":
             primary = pattern_plan.get("primary")
@@ -774,6 +1015,12 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
             witness_weight = max(0.05, entry_presence * (1.0 - noise))
             cctv_weight = float(entry_surveillance.get("cctv", 0.0))
             logs_weight = min(0.8, 0.2 + (0.1 * len(entry_logs))) if entry_logs else 0.0
+            if exit_style == "vehicle":
+                cctv_weight += 0.2
+                logs_weight += 0.1
+            elif exit_style == "misdirection":
+                witness_weight += 0.1
+                logs_weight += 0.1
             choice = _weighted_choice(
                 offsite_rng.fork(f"choice:{idx}"),
                 {"cctv": cctv_weight, "logs": logs_weight, "witness": witness_weight},

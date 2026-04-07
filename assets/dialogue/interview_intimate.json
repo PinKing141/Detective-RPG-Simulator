@@ -1,0 +1,33 @@
+{
+  "graph": {
+    "root": "START",
+    "nodes": [
+      {
+        "id": "START",
+        "text": "",
+        "choices": [
+          {"text": "Ask who was around", "leads_to": "BASELINE_PRESENCE", "tags": ["baseline", "presence"]},
+          {"text": "Ask about the time window", "leads_to": "BASELINE_TIMING", "tags": ["baseline", "opportunity", "timeline"]},
+          {"text": "Ask about prior contact", "leads_to": "BASELINE_RELATION", "tags": ["baseline", "relationship"]},
+          {"text": "Press the contradiction", "leads_to": "PRESSURE_CONTRADICTION", "tags": ["pressure", "contradiction"]},
+          {"text": "Pin down the exact location", "leads_to": "PRESSURE_LOCATION", "tags": ["pressure", "location"]},
+          {"text": "Frame it as the victim bringing trouble", "leads_to": "THEME_BLAME", "tags": ["theme", "theme:blame_victim", "blame_victim"]},
+          {"text": "Frame it as pressure and circumstance", "leads_to": "THEME_CIRCUMSTANCE", "tags": ["theme", "theme:circumstance", "circumstance"]},
+          {"text": "Frame it as someone trying to protect something", "leads_to": "THEME_ALTRUISTIC", "tags": ["theme", "theme:altruistic", "altruistic"]},
+          {"text": "Frame it as something that got out of hand", "leads_to": "THEME_ACCIDENTAL", "tags": ["theme", "theme:accidental", "accidental"]}
+        ]
+      },
+      {"id": "BASELINE_PRESENCE", "text": "I know the difference between a stranger's movement and a familiar one. What I saw near {place} was familiar enough to hurt before it made sense."},
+      {"id": "BASELINE_TIMING", "text": "{time_phrase}. I remember because I was already listening for something to go wrong."},
+      {"id": "BASELINE_RELATION", "text": "You are asking about prior contact like it can be folded into one clean sentence. It cannot."},
+      {"id": "PRESSURE_CONTRADICTION", "text": "Contradiction? Memory frays when you love or fear the people inside it. Sometimes both."},
+      {"id": "PRESSURE_LOCATION", "text": "Exact location? Near enough that I felt it in my body before I could name the geometry of it."},
+      {"id": "THEME_BLAME", "text": "If you want me to blame the victim, you are asking the wrong witness. Intimate knowledge does not make cruelty easier to file."},
+      {"id": "THEME_CIRCUMSTANCE", "text": "Circumstance matters because intimate lives rot in small increments before they break in public."},
+      {"id": "THEME_ALTRUISTIC", "text": "People hurt the ones nearest to them while insisting they are protecting something precious. I have heard that language before."},
+      {"id": "THEME_ACCIDENTAL", "text": "Accidental may explain the spark. It does not explain the hand that stayed afterward.", "choices": [{"text": "Ask whether it looked sudden", "leads_to": "THEME_ACCIDENTAL_SUDDEN", "tags": ["theme", "theme:accidental", "accidental"]}, {"text": "Ask whether someone tried to fix it after", "leads_to": "THEME_ACCIDENTAL_AFTER", "tags": ["theme", "theme:accidental", "accidental"]}]},
+      {"id": "THEME_ACCIDENTAL_SUDDEN", "text": "Yes. Sudden enough to wound. Not sudden enough to keep guilt from making plans right after."},
+      {"id": "THEME_ACCIDENTAL_AFTER", "text": "That part I believe without reservation. Somebody stayed to edit the truth before they left it."}
+    ]
+  }
+}

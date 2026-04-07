@@ -1,0 +1,33 @@
+{
+  "graph": {
+    "root": "START",
+    "nodes": [
+      {
+        "id": "START",
+        "text": "",
+        "choices": [
+          {"text": "Ask who was around", "leads_to": "BASELINE_PRESENCE", "tags": ["baseline", "presence"]},
+          {"text": "Ask about the time window", "leads_to": "BASELINE_TIMING", "tags": ["baseline", "opportunity", "timeline"]},
+          {"text": "Ask about prior contact", "leads_to": "BASELINE_RELATION", "tags": ["baseline", "relationship"]},
+          {"text": "Press the contradiction", "leads_to": "PRESSURE_CONTRADICTION", "tags": ["pressure", "contradiction"]},
+          {"text": "Pin down the exact location", "leads_to": "PRESSURE_LOCATION", "tags": ["pressure", "location"]},
+          {"text": "Frame it as the victim bringing trouble", "leads_to": "THEME_BLAME", "tags": ["theme", "theme:blame_victim", "blame_victim"]},
+          {"text": "Frame it as pressure and circumstance", "leads_to": "THEME_CIRCUMSTANCE", "tags": ["theme", "theme:circumstance", "circumstance"]},
+          {"text": "Frame it as someone trying to protect something", "leads_to": "THEME_ALTRUISTIC", "tags": ["theme", "theme:altruistic", "altruistic"]},
+          {"text": "Frame it as something that got out of hand", "leads_to": "THEME_ACCIDENTAL", "tags": ["theme", "theme:accidental", "accidental"]}
+        ]
+      },
+      {"id": "BASELINE_PRESENCE", "text": "I notice patterns for a living. Movement near {place} stood out because it did not fit the hour or the posture of everybody else on shift."},
+      {"id": "BASELINE_TIMING", "text": "{time_phrase}. Close enough to the schedule break that I remember exactly what part of the shift I was in."},
+      {"id": "BASELINE_RELATION", "text": "I knew the victim the way staff know regular trouble: by rhythm, not intimacy."},
+      {"id": "PRESSURE_CONTRADICTION", "text": "You are treating operational memory like confession. They are not the same discipline."},
+      {"id": "PRESSURE_LOCATION", "text": "Exact location? Near the service angle, where people who know a building stop behaving like visitors."},
+      {"id": "THEME_BLAME", "text": "I have seen people make the same bad choice in six different uniforms. That does not make the outcome inevitable, only familiar."},
+      {"id": "THEME_CIRCUMSTANCE", "text": "Circumstance is just pressure with paperwork. Short staffing, debt, favors, access, humiliation. It all looks operational until it turns violent."},
+      {"id": "THEME_ALTRUISTIC", "text": "People do reckless things for coworkers, family, and the stories they tell themselves about loyalty."},
+      {"id": "THEME_ACCIDENTAL", "text": "Accidental is what incident reports say when no one wants to write down the chain of decisions that made the scene possible.", "choices": [{"text": "Ask whether it looked sudden", "leads_to": "THEME_ACCIDENTAL_SUDDEN", "tags": ["theme", "theme:accidental", "accidental"]}, {"text": "Ask whether someone tried to fix it after", "leads_to": "THEME_ACCIDENTAL_AFTER", "tags": ["theme", "theme:accidental", "accidental"]}]},
+      {"id": "THEME_ACCIDENTAL_SUDDEN", "text": "The impact may have been sudden. The setup rarely is."},
+      {"id": "THEME_ACCIDENTAL_AFTER", "text": "That is the part I expect. People start managing appearances the second they realize the incident will outlive them."}
+    ]
+  }
+}

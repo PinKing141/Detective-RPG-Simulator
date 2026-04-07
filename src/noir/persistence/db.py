@@ -49,14 +49,22 @@ class WorldStore:
         row = cur.fetchone()
         if row is None:
             state = WorldState()
-            self.save_world_state(state)
-            return state
-        state = WorldState(
-            trust=int(row["trust_level"]),
-            pressure=int(row["pressure_level"]),
-            tick=int(row["tick"]),
-            nemesis_exposure=int(row["nemesis_exposure"]),
-        )
+            cur.execute(
+                """
+                INSERT INTO world_state (id, trust_level, pressure_level, tick, nemesis_exposure)
+                VALUES (1, ?, ?, ?, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+                (state.trust, state.pressure, state.tick, state.nemesis_exposure),
+            )
+            self.conn.commit()
+        else:
+            state = WorldState(
+                trust=int(row["trust_level"]),
+                pressure=int(row["pressure_level"]),
+                tick=int(row["tick"]),
+                nemesis_exposure=int(row["nemesis_exposure"]),
+            )
         cur.execute("SELECT state_json FROM nemesis_state WHERE id = 1")
         row = cur.fetchone()
         if row is not None and row["state_json"]:
