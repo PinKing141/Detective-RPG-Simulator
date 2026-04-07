@@ -1,0 +1,271 @@
+{
+  "graph": {
+    "root": "START",
+    "nodes": [
+      {
+        "id": "START",
+        "text": "",
+        "choices": [
+          {
+            "text": "Ask where they were",
+            "leads_to": "SUSP_LOCATION",
+            "tags": ["presence", "baseline"]
+          },
+          {
+            "text": "Ask what they saw",
+            "leads_to": "SUSP_DENIAL",
+            "tags": ["presence", "witness"]
+          },
+          {
+            "text": "Probe the timeline",
+            "leads_to": "SUSP_TIMELINE",
+            "tags": ["timeline", "opportunity"]
+          },
+          {
+            "text": "Challenge their alibi",
+            "leads_to": "SUSP_ALIBI",
+            "tags": ["alibi", "opportunity", "pressure"]
+          },
+          {
+            "text": "Ask about their connection to the victim",
+            "leads_to": "SUSP_VICTIM_REL",
+            "tags": ["relationship"]
+          },
+          {
+            "text": "Ask about their recent behavior",
+            "leads_to": "SUSP_BEHAVIOR",
+            "tags": ["behavior", "relationship"]
+          },
+          {
+            "text": "Press on the contradictions",
+            "leads_to": "SUSP_CONTRA",
+            "tags": ["pressure", "contradiction"]
+          },
+          {
+            "text": "Suggest you understand why it happened",
+            "leads_to": "SUSP_THEME",
+            "tags": ["blame_victim", "circumstance", "altruistic", "accidental", "theme"]
+          }
+        ]
+      },
+
+      {
+        "id": "SUSP_LOCATION",
+        "text": "I was at home that evening. I have already been over this.",
+        "choices": [
+          {
+            "text": "Where exactly?",
+            "leads_to": "SUSP_LOC_EXACT",
+            "tags": []
+          },
+          {
+            "text": "Can anyone verify that?",
+            "leads_to": "SUSP_LOC_WITNESS",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "SUSP_LOC_EXACT",
+        "text": "In my apartment. The entire evening. I did not go out. I did not think I would need to document an ordinary Tuesday night."
+      },
+      {
+        "id": "SUSP_LOC_WITNESS",
+        "text": "I live alone. There is no one to call. That is not unusual. Most people do not keep a chaperone."
+      },
+
+      {
+        "id": "SUSP_DENIAL",
+        "text": "I was not near {place} that evening. Not at any point.",
+        "choices": [
+          {
+            "text": "Witnesses put you there.",
+            "leads_to": "SUSP_DENIAL_WITNESS",
+            "tags": []
+          },
+          {
+            "text": "Are you certain?",
+            "leads_to": "SUSP_DENIAL_CERTAIN",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "SUSP_DENIAL_WITNESS",
+        "text": "Then they are mistaken. Or they have their own reasons for pointing in my direction. I cannot account for what other people claim to have seen."
+      },
+      {
+        "id": "SUSP_DENIAL_CERTAIN",
+        "text": "Completely certain. I know exactly where I was. I do not confuse my evenings."
+      },
+
+      {
+        "id": "SUSP_TIMELINE",
+        "text": "My timeline is what I gave you. {time_phrase}. At home. I have said this.",
+        "choices": [
+          {
+            "text": "How can you be so precise?",
+            "leads_to": "SUSP_TIME_PRECISE",
+            "tags": []
+          },
+          {
+            "text": "The timing does not match.",
+            "leads_to": "SUSP_TIME_PRESSED",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "SUSP_TIME_PRECISE",
+        "text": "I checked my phone. Notifications. Around {time_phrase}, possibly just before. It is there in the history if you need to look."
+      },
+      {
+        "id": "SUSP_TIME_PRESSED",
+        "text": "The timing I have given you is accurate. If you are searching for a gap, there is not one. I have been consistent."
+      },
+
+      {
+        "id": "SUSP_ALIBI",
+        "text": "I was home. I have told you this three times now. I do not understand what more you want.",
+        "choices": [
+          {
+            "text": "No one can place you there.",
+            "leads_to": "SUSP_ALIBI_VERIFY",
+            "tags": []
+          },
+          {
+            "text": "There is a gap in the window you described.",
+            "leads_to": "SUSP_ALIBI_GAP",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "SUSP_ALIBI_VERIFY",
+        "text": "I was alone at home. That is not a crime. There is nothing to place me anywhere because I was not anywhere. I was home."
+      },
+      {
+        "id": "SUSP_ALIBI_GAP",
+        "text": "I stepped outside briefly. For air. Perhaps ten minutes. I did not think it warranted mentioning because it meant nothing."
+      },
+
+      {
+        "id": "SUSP_VICTIM_REL",
+        "text": "We had a professional relationship. Cordial enough. Nothing that would be relevant to this.",
+        "choices": [
+          {
+            "text": "Was there tension between you?",
+            "leads_to": "SUSP_REL_TENSE",
+            "tags": []
+          },
+          {
+            "text": "When did you last see them?",
+            "leads_to": "SUSP_REL_LAST",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "SUSP_REL_TENSE",
+        "text": "We disagreed on certain things. That is the nature of any professional arrangement. It did not go beyond that."
+      },
+      {
+        "id": "SUSP_REL_LAST",
+        "text": "Last week. Briefly, at {place}. We spoke for a few minutes. Nothing worth noting at the time."
+      },
+
+      {
+        "id": "SUSP_BEHAVIOR",
+        "text": "My behavior has been entirely normal. I do not know what you are suggesting.",
+        "choices": [
+          {
+            "text": "People say you seemed different lately.",
+            "leads_to": "SUSP_BEH_UNUSUAL",
+            "tags": []
+          },
+          {
+            "text": "You were under a great deal of pressure.",
+            "leads_to": "SUSP_BEH_STRESS",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "SUSP_BEH_UNUSUAL",
+        "text": "What does unusual mean? I have been going about my life the same as always. If someone told you otherwise, I would like to know who."
+      },
+      {
+        "id": "SUSP_BEH_STRESS",
+        "text": "Everyone has stress. I have not been any different from usual. This kind of thing — it is just a fishing expedition."
+      },
+
+      {
+        "id": "SUSP_CONTRA",
+        "text": "I have not contradicted myself. You may want to review your notes more carefully.",
+        "choices": [
+          {
+            "text": "Your account does not match others we spoke to.",
+            "leads_to": "SUSP_CONTRA_DENY",
+            "tags": []
+          },
+          {
+            "text": "Take your time. Think about what you are saying.",
+            "leads_to": "SUSP_CONTRA_CONSIDER",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "SUSP_CONTRA_DENY",
+        "text": "I have given you the same account every time. If there is a discrepancy, it is in how you are reading it, not in what I said."
+      },
+      {
+        "id": "SUSP_CONTRA_CONSIDER",
+        "text": "I understand the tactic. You are looking for the moment I change my story. You will not find it because there is nothing to find."
+      },
+
+      {
+        "id": "SUSP_THEME",
+        "text": "What exactly are you implying?",
+        "choices": [
+          {
+            "text": "That the victim may have pushed someone past their limit.",
+            "leads_to": "SUSP_THEME_BV",
+            "tags": ["blame_victim"]
+          },
+          {
+            "text": "That circumstances can force a person's hand.",
+            "leads_to": "SUSP_THEME_CIRC",
+            "tags": ["circumstance"]
+          },
+          {
+            "text": "That someone may have been trying to protect another person.",
+            "leads_to": "SUSP_THEME_ALT",
+            "tags": ["altruistic"]
+          },
+          {
+            "text": "That this may not have been intended to go this far.",
+            "leads_to": "SUSP_THEME_ACC",
+            "tags": ["accidental"]
+          }
+        ]
+      },
+      {
+        "id": "SUSP_THEME_BV",
+        "text": "I will not say they deserved it. Whatever difficulties existed between us, I would not characterize it that way. I want to be clear about that."
+      },
+      {
+        "id": "SUSP_THEME_CIRC",
+        "text": "Circumstances. That is an interesting frame. I am telling you I was not involved, so whatever circumstances you are describing did not involve me."
+      },
+      {
+        "id": "SUSP_THEME_ALT",
+        "text": "Protect someone. That is a theory. I was at home. There was no one to protect and no situation that required it."
+      },
+      {
+        "id": "SUSP_THEME_ACC",
+        "text": "Accidental. You are still suggesting I was there. I was not. The question does not apply to me."
+      }
+    ]
+  }
+}
