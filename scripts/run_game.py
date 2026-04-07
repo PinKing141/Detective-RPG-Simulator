@@ -33,8 +33,8 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
+from noir.investigation.dialog_graph import load_interview_graph, resolve_dialog_role_key
 from noir.investigation.operations import OperationTier, OperationType, WarrantType
-from noir.investigation.dialog_graph import load_default_interview_graph
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
 from noir.investigation.leads import (
     LeadStatus,
@@ -86,6 +86,7 @@ from noir.profiling.summary import build_profiling_summary, format_profiling_sum
 from noir.util.rng import Rng
 from noir.util.grammar import normalize_line
 from noir.persistence.db import WorldStore
+from noir.persistence.save_load import delete_save, has_save, load_investigation, save_investigation
 from noir.world.autonomy import apply_autonomy
 from noir.world.state import CaseStartModifiers, EndgameState, PersonRecord, WorldState
 
@@ -221,8 +222,55 @@ def _choose_warrant_type() -> WarrantType | None:
     return _choose_enum(WarrantType, lambda value: labels.get(value, value.value))
 
 
-def _choose_dialog_choice(state: InvestigationState, witness_id) -> int | None:
-    graph = load_default_interview_graph()
+def _dialog_relationship_profile(truth, person_id) -> tuple[str | None, str | None]:
+    victim = next(
+        (candidate for candidate in truth.people.values() if RoleTag.VICTIM in candidate.role_tags),
+        None,
+    )
+    offender = next(
+        (candidate for candidate in truth.people.values() if RoleTag.OFFENDER in candidate.role_tags),
+        None,
+    )
+    relations = []
+    for related_person in (victim, offender):
+        if related_person is None:
+            continue
+        relation = truth.relationship_between(person_id, related_person.id)
+        if relation:
+            relations.append(relation)
+    for relation in relations:
+        if str(relation.get("closeness", "") or "").lower() == "intimate":
+            return str(relation.get("closeness", "") or ""), str(
+                relation.get("relationship_type", "") or ""
+            )
+    if relations:
+        relation = relations[0]
+        return str(relation.get("closeness", "") or ""), str(
+            relation.get("relationship_type", "") or ""
+        )
+    return None, None
+
+
+def _dialog_role_key_for_witness(truth, state: InvestigationState, witness_id) -> str:
+    person = truth.people.get(witness_id)
+    if person is None:
+        return "default"
+    interview_state = state.interviews.get(str(witness_id))
+    relationship_closeness, relationship_type = _dialog_relationship_profile(
+        truth, witness_id
+    )
+    return resolve_dialog_role_key(
+        person.role_tags,
+        person.traits if isinstance(person.traits, dict) else None,
+        motive_to_lie=bool(interview_state and interview_state.motive_to_lie),
+        relationship_closeness=relationship_closeness,
+        relationship_type=relationship_type,
+    )
+
+
+def _choose_dialog_choice(truth, state: InvestigationState, witness_id) -> int | None:
+    role_key = _dialog_role_key_for_witness(truth, state, witness_id)
+    graph = load_interview_graph(role_key)
     if graph is None:
         return None
     interview_state = state.interviews.get(str(witness_id))
@@ -246,6 +294,38 @@ def _choose_dialog_choice(state: InvestigationState, witness_id) -> int | None:
     if index < 0 or index >= len(node.choices):
         return None
     return index
+
+
+def _restore_investigation_snapshot(
+    seed: int,
+    case_id: str,
+    state: InvestigationState,
+    presentation,
+) -> tuple[InvestigationState, object, DeductionBoard, str | None]:
+    loaded = load_investigation(case_id)
+    if loaded is None:
+        return state, presentation, DeductionBoard(), None
+    loaded_seed, loaded_state, loaded_presentation = loaded
+    if loaded_seed != seed:
+        return state, presentation, DeductionBoard(), (
+            f"Save file for {case_id} exists but was written with seed {loaded_seed}; ignoring it."
+        )
+    board = DeductionBoard()
+    board.sync_from_state(loaded_state)
+    return loaded_state, loaded_presentation, board, f"Loaded saved investigation for {case_id}."
+
+
+def _active_location_context(
+    state: InvestigationState,
+    fallback_location_id,
+    fallback_name: str,
+    fallback_district: str,
+):
+    active_location_id = state.active_location_id or fallback_location_id
+    active_state = state.location_states.get(str(active_location_id))
+    if active_state is None:
+        return active_location_id, fallback_name, fallback_district
+    return active_location_id, active_state.name, active_state.district
 
 
 def _observed_suspect_id(presentation, evidence_ids: list) -> object | None:
@@ -1019,6 +1099,19 @@ def main() -> None:
         case_id_override=args.case_id,
         case_archetype=queue_archetype,
     )
+    if has_save(truth.case_id):
+        load_choice = input(
+            f"Saved investigation found for {truth.case_id}. Load it? [Y/n] "
+        ).strip().lower()
+        if load_choice not in {"n", "no"}:
+            state, presentation, board, load_note = _restore_investigation_snapshot(
+                args.seed,
+                truth.case_id,
+                state,
+                presentation,
+            )
+            if load_note:
+                print(load_note)
     if world_store and queue_payload is not None:
         world_store.save_world_state(world)
     location_roster = {
@@ -1026,12 +1119,12 @@ def main() -> None:
         for entry in (case_facts.get("locations") or [])
         if entry.get("location_id")
     }
-    if state.active_location_id:
-        location_id = state.active_location_id
-        active_state = state.location_states.get(str(location_id))
-        if active_state:
-            location_name = active_state.name
-            district = active_state.district
+    location_id, location_name, district = _active_location_context(
+        state,
+        location_id,
+        location_name,
+        district,
+    )
 
     episode_rng = base_rng.fork(f"episode-{case_index}")
     printed_lines = _print_episode_intro(
@@ -1154,6 +1247,8 @@ def main() -> None:
         print("14) Stakeout")
         print("15) Bait operation")
         print("16) Raid")
+        print("17) Save investigation")
+        print("18) Load investigation")
         print("g) Toggle gaze")
         choice = input("> ").strip().lower()
         if choice == "q":
@@ -1240,7 +1335,7 @@ def main() -> None:
                 if theme is None:
                     print("Invalid theme selection.")
                     continue
-            dialog_choice_index = _choose_dialog_choice(state, selection[1].id)
+            dialog_choice_index = _choose_dialog_choice(truth, state, selection[1].id)
             result = interview(
                 truth,
                 presentation,
@@ -1441,6 +1536,30 @@ def main() -> None:
                 location_id,
                 evidence_ids,
             )
+        elif choice == "17":
+            save_path = save_investigation(truth.case_id, args.seed, state, presentation)
+            print(f"Saved investigation to {save_path}.")
+            continue
+        elif choice == "18":
+            if not has_save(truth.case_id):
+                print("No saved investigation exists for this case.")
+                continue
+            state, presentation, board, load_note = _restore_investigation_snapshot(
+                args.seed,
+                truth.case_id,
+                state,
+                presentation,
+            )
+            if load_note:
+                print(load_note)
+            location_id, location_name, district = _active_location_context(
+                state,
+                location_id,
+                location_name,
+                district,
+            )
+            selected_evidence_id = state.knowledge.known_evidence[0] if state.knowledge.known_evidence else None
+            continue
         else:
             print("Unknown action.")
             continue
@@ -1641,6 +1760,7 @@ def main() -> None:
             world.update_closing_in(pattern_type, profile_used, proof_met)
             early = check_early_ending(world)
             if early:
+                delete_save(truth.case_id)
                 print("")
                 print(early.title)
                 for line in early.lines:
@@ -1654,6 +1774,7 @@ def main() -> None:
             if world_store:
                 world_store.save_world_state(world)
                 world_store.record_case(world.case_history[-1])
+            delete_save(truth.case_id)
             case_start_tick = world.tick
             next_case_payload = None
             next_case_archetype = case_archetype
@@ -1671,17 +1792,30 @@ def main() -> None:
                 pattern_tracker=pattern_tracker,
                 case_archetype=next_case_archetype,
             )
+            if has_save(truth.case_id):
+                load_choice = input(
+                    f"Saved investigation found for {truth.case_id}. Load it? [Y/n] "
+                ).strip().lower()
+                if load_choice not in {"n", "no"}:
+                    state, presentation, board, load_note = _restore_investigation_snapshot(
+                        args.seed,
+                        truth.case_id,
+                        state,
+                        presentation,
+                    )
+                    if load_note:
+                        print(load_note)
             location_roster = {
                 str(entry.get("location_id")): entry
                 for entry in (case_facts.get("locations") or [])
                 if entry.get("location_id")
             }
-            if state.active_location_id:
-                location_id = state.active_location_id
-                active_state = state.location_states.get(str(location_id))
-                if active_state:
-                    location_name = active_state.name
-                    district = active_state.district
+            location_id, location_name, district = _active_location_context(
+                state,
+                location_id,
+                location_name,
+                district,
+            )
             selected_evidence_id = None
             profile_lines = []
             episode_rng = base_rng.fork(f"episode-{case_index}")

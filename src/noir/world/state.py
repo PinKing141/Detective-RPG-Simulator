@@ -9,6 +9,11 @@ from noir.cases.archetypes import CaseArchetype
 from noir.investigation.costs import PRESSURE_LIMIT, clamp
 from noir.nemesis.state import NemesisState
 from noir.investigation.outcomes import ArrestResult, CaseOutcome, TRUST_LIMIT
+from noir.showrunner.scheduler import (
+    advance_episode as advance_campaign_episode,
+    ensure_case_queue as ensure_scheduled_case_queue,
+    pop_next_case as pop_scheduled_case,
+)
 from noir.util.rng import Rng
 
 
@@ -131,15 +136,6 @@ class CampaignState:
             endgame_result=payload.get("endgame_result"),
         )
 
-
-_TENSION_WAVE = [
-    CaseArchetype.CHARACTER,
-    CaseArchetype.BASELINE,
-    CaseArchetype.PRESSURE,
-    CaseArchetype.FORESHADOWING,
-    CaseArchetype.PATTERN,
-]
-
 _ENDGAME_PATTERN_MIN = 2
 _ENDGAME_NARROWING_MIN = 2
 _ENDGAME_PROOF_MIN = 1
@@ -247,18 +243,24 @@ class WorldState:
         )
 
     def advance_episode(self) -> None:
-        self.campaign.episode_index = max(1, self.campaign.episode_index + 1)
+        advance_campaign_episode(self.campaign)
 
     def ensure_case_queue(self, target_size: int = 1) -> None:
-        while len(self.campaign.case_queue) < target_size:
-            self.campaign.case_queue.append(self._schedule_case_payload())
+        ensure_scheduled_case_queue(
+            self.campaign,
+            self.pressure,
+            self.case_history,
+            target_size=target_size,
+            endgame_ready=self.endgame_ready(),
+        )
 
     def pop_next_case(self) -> dict[str, str] | None:
-        if not self.campaign.case_queue:
-            self.ensure_case_queue()
-        if not self.campaign.case_queue:
-            return None
-        return self.campaign.case_queue.pop(0)
+        return pop_scheduled_case(
+            self.campaign,
+            self.pressure,
+            self.case_history,
+            endgame_ready=self.endgame_ready(),
+        )
 
     def update_closing_in(
         self,
@@ -352,25 +354,6 @@ class WorldState:
                 if note:
                     notes.append(note)
         return notes
-
-    def _schedule_case_payload(self) -> dict[str, str]:
-        archetype = self._tension_wave_archetype()
-        reason = "tension_wave"
-        last_record = self.case_history[-1] if self.case_history else None
-        if last_record and last_record.outcome == ArrestResult.FAILED.value:
-            archetype = CaseArchetype.CHARACTER
-            reason = "cooldown_after_failure"
-        elif self.pressure >= 4:
-            archetype = CaseArchetype.CHARACTER
-            reason = "cooldown_pressure"
-        elif self.pressure <= 1 and archetype == CaseArchetype.CHARACTER:
-            archetype = CaseArchetype.PRESSURE
-            reason = "pressure_spike"
-        return {"archetype": archetype.value, "reason": reason}
-
-    def _tension_wave_archetype(self) -> CaseArchetype:
-        index = (self.campaign.episode_index - 1) % len(_TENSION_WAVE)
-        return _TENSION_WAVE[index]
 
     def context_lines(self, district: str, location_name: str) -> list[str]:
         status = self.district_status_for(district)

@@ -437,12 +437,13 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
     if kill_event.metadata and "method_category" in kill_event.metadata:
         method_category = str(kill_event.metadata.get("method_category"))
 
-    witnesses = [
-        person for person in truth.people.values() if RoleTag.WITNESS in person.role_tags
-    ]
+    witnesses = sorted(
+        (person for person in truth.people.values() if RoleTag.WITNESS in person.role_tags),
+        key=lambda person: person.name,
+    )
     if witnesses:
-        for witness in witnesses:
-            witness_rng = rng.fork(f"witness:{witness.id}")
+        for witness_index, witness in enumerate(witnesses):
+            witness_rng = rng.fork(f"witness:{witness_index}:{witness.name}")
             relation = (
                 truth.relationship_between(witness.id, offender.id) if offender else None
             )

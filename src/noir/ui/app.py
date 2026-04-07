@@ -86,6 +86,7 @@ from noir.profiling.summary import build_profiling_summary, format_profiling_sum
 from noir.util.rng import Rng
 from noir.util.grammar import dedupe_lines, normalize_line
 from noir.persistence.db import WorldStore
+from noir.persistence.save_load import delete_save, has_save, load_investigation, save_investigation
 from noir.world.autonomy import apply_autonomy
 from noir.world.state import CaseStartModifiers, EndgameState, PersonRecord, WorldState
 
@@ -293,7 +294,7 @@ class Phase05App(App):
                     yield VerticalScroll(Static("", id="detail_view", expand=True), id="detail")
                 yield RichLog(id="wire", wrap=True)
                 yield ListView(id="actions")
-                yield Input(placeholder="Enter command (1-13 or q)...", id="command")
+                yield Input(placeholder="Enter command (1-18 or q)...", id="command")
 
     def on_mount(self) -> None:
         self._has_mounted = True
@@ -310,7 +311,7 @@ class Phase05App(App):
             for line in self._pending_briefing:
                 self._write(line)
             self._pending_briefing = []
-        self._write("Use the Actions list (Enter) or press I/F8 to type a number. Type 'q' to quit.")
+        self._write("Use the Actions list (Enter) or press I/F8 to type a number (1-18). Type 'q' to quit.")
         self._write("Focus: A actions, L list, D detail, W wire, I input (Tab cycles). G toggles gaze.")
         if self.view_mode == "case_file":
             self.query_one("#actions", ListView).focus()
@@ -819,6 +820,8 @@ class Phase05App(App):
             {"cmd": "14", "label": "Stakeout", "enabled": endgame_ready and has_hypothesis},
             {"cmd": "15", "label": "Bait operation", "enabled": endgame_ready and has_hypothesis},
             {"cmd": "16", "label": "Raid", "enabled": endgame_ready and has_hypothesis and has_warrant},
+            {"cmd": "17", "label": "Save investigation", "enabled": True},
+            {"cmd": "18", "label": "Load investigation", "enabled": has_save(self.truth.case_id)},
         ]
 
     def _refresh_actions(self) -> None:
@@ -1147,6 +1150,57 @@ class Phase05App(App):
         self.location_name = location_state.name
         self.district = location_state.district
 
+    def _sync_active_location_from_state(self) -> None:
+        active_location_id = self.state.active_location_id or self.location_id
+        active_state = self.state.location_states.get(str(active_location_id))
+        if active_state is not None:
+            self._set_active_location(active_state)
+
+    def _save_investigation_snapshot(self) -> None:
+        save_path = save_investigation(
+            self.truth.case_id,
+            self.seed,
+            self.state,
+            self.presentation,
+        )
+        self._write(f"Investigation saved to {save_path}.")
+        self._refresh_actions()
+
+    def _load_investigation_snapshot(
+        self,
+        *,
+        announce: bool = True,
+        refresh: bool = True,
+    ) -> bool:
+        loaded = load_investigation(self.truth.case_id)
+        if loaded is None:
+            if announce:
+                self._write("No saved investigation exists for this case.")
+            return False
+        loaded_seed, loaded_state, loaded_presentation = loaded
+        if loaded_seed != self.seed:
+            if announce:
+                self._write(
+                    f"Saved investigation uses seed {loaded_seed}; current session uses {self.seed}."
+                )
+            return False
+        self.state = loaded_state
+        self.presentation = loaded_presentation
+        self.board = DeductionBoard()
+        self.board.sync_from_state(self.state)
+        self.selected_evidence_id = (
+            self.state.knowledge.known_evidence[0]
+            if self.state.knowledge.known_evidence
+            else None
+        )
+        self._sync_active_location_from_state()
+        if announce:
+            self._write(f"Loaded saved investigation for {self.truth.case_id}.")
+        if refresh and self._has_mounted:
+            self._refresh_header()
+            self._refresh_lists()
+        return True
+
     def _poi_lines(self) -> list[str]:
         if not self.state.scene_pois:
             return ["(none)"]
@@ -1431,6 +1485,12 @@ class Phase05App(App):
                 return
             self._start_operation_prompt(OperationType.RAID, "Raid evidence")
             return
+        if value == "17":
+            self._save_investigation_snapshot()
+            return
+        if value == "18":
+            self._load_investigation_snapshot()
+            return
         self._write("Unknown action.")
 
     def _apply_action_result(self, result) -> None:
@@ -1498,6 +1558,7 @@ class Phase05App(App):
         self._write(ending.title)
         for line in ending.lines:
             self._write(line)
+        delete_save(self.truth.case_id)
         if self.world_store:
             self.world_store.save_world_state(self.world)
         self.exit()
@@ -1602,6 +1663,7 @@ class Phase05App(App):
         if self.world_store:
             self.world_store.save_world_state(self.world)
             self.world_store.record_case(self.world.case_history[-1])
+        delete_save(self.truth.case_id)
         self.case_start_tick = self.world.tick
         self._start_case(self.case_index)
         self._write(f"New case {self.truth.case_id} started.")
@@ -1747,6 +1809,10 @@ class Phase05App(App):
         self.profile_lines = []
         self.item_id = self.case_facts["weapon_id"]
         self._sync_people(self.truth.case_id)
+        restored_snapshot = self._load_investigation_snapshot(
+            announce=False,
+            refresh=False,
+        )
         if has_returning:
             self.case_modifiers = CaseStartModifiers(
                 cooperation=self.case_modifiers.cooperation,
@@ -1760,12 +1826,16 @@ class Phase05App(App):
                 for line in dedupe_lines(self.case_modifiers.briefing_lines)
                 if line not in intro_lines
             ]
+            if restored_snapshot:
+                briefing_payload.append("Saved investigation restored for this case.")
             briefing_lines.extend(briefing_payload)
             if self._has_mounted:
                 for line in briefing_payload:
                     self._write(line)
             else:
                 self._pending_briefing = list(briefing_payload)
+        elif restored_snapshot:
+            briefing_lines.append("Saved investigation restored for this case.")
         self.briefing_title = "CASE BRIEFING"
         self.briefing_lines = dedupe_lines(briefing_lines)
         self.view_mode = "briefing"
