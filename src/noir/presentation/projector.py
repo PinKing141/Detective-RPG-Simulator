@@ -13,6 +13,7 @@ from noir.presentation.evidence import (
     PresentationCase,
     WitnessStatement,
 )
+from noir.presentation.projector_forensics import build_contextual_lab_result
 from noir.presentation.erosion import confidence_from_window, fuzz_time, maybe_omit
 from noir.truth.graph import TruthState
 from noir.util.grammar import place_with_article
@@ -248,6 +249,287 @@ def _pattern_poi_id(
     if not candidates:
         return body_poi_id or entry_poi_id
     return rng.choice(candidates)
+
+
+def _false_lead_person(truth: TruthState, rng: Rng):
+    candidates: list[tuple[object, float]] = []
+    for person in truth.people.values():
+        role_tags = set(person.role_tags)
+        if RoleTag.OFFENDER in role_tags or RoleTag.VICTIM in role_tags:
+            continue
+        weight = 1.0
+        if RoleTag.WITNESS in role_tags:
+            weight += 0.5
+        if isinstance(person.traits, dict):
+            witness_role = str(person.traits.get("witness_role", "") or "")
+            if witness_role in {"neighbor", "resident", "security", "staff", "maintenance"}:
+                weight += 0.35
+        candidates.append((person, weight))
+    if not candidates:
+        return None
+    return rng.weighted_choice(candidates)
+
+
+def _false_lead_window(crime_time: int, rng: Rng) -> tuple[int, int]:
+    start = max(0, crime_time - rng.randint(1, 2))
+    end = min(23, crime_time + rng.randint(0, 1))
+    return start, max(start, end)
+
+
+def _confidence_rank(confidence: ConfidenceBand) -> int:
+    if confidence == ConfidenceBand.STRONG:
+        return 3
+    if confidence == ConfidenceBand.MEDIUM:
+        return 2
+    return 1
+
+
+def _offender_direct_confidence(truth: TruthState, evidence: list) -> ConfidenceBand | None:
+    offender = next(
+        (person for person in truth.people.values() if RoleTag.OFFENDER in person.role_tags),
+        None,
+    )
+    if offender is None:
+        return None
+    strongest: ConfidenceBand | None = None
+    for item in evidence:
+        seen = getattr(item, "observed_person_ids", [])
+        if offender.id not in seen:
+            continue
+        confidence = getattr(item, "confidence", ConfidenceBand.WEAK)
+        if strongest is None or _confidence_rank(confidence) > _confidence_rank(strongest):
+            strongest = confidence
+    return strongest
+
+
+def _ensure_real_suspect_trail(
+    truth: TruthState,
+    evidence: list,
+    primary_location_id: UUID,
+    location_name: str,
+    crime_time: int,
+    rng: Rng,
+) -> None:
+    if _offender_direct_confidence(truth, evidence) is not None:
+        return
+    offender = next(
+        (person for person in truth.people.values() if RoleTag.OFFENDER in person.role_tags),
+        None,
+    )
+    witness = next(
+        (person for person in truth.people.values() if RoleTag.WITNESS in person.role_tags),
+        None,
+    )
+    if offender is None or witness is None:
+        return
+    window = _false_lead_window(crime_time, rng)
+    evidence.append(
+        WitnessStatement(
+            evidence_type=EvidenceType.TESTIMONIAL,
+            summary="Witness statement (possible match)",
+            source=witness.name,
+            time_collected=crime_time + 1,
+            confidence=ConfidenceBand.WEAK,
+            witness_id=witness.id,
+            statement=(
+                f"I think I saw {offender.name} near {place_with_article(location_name)} "
+                f"{_format_time_phrase(window)}."
+            ),
+            reported_time_window=window,
+            location_id=primary_location_id,
+            observed_person_ids=[offender.id],
+            uncertainty_hooks=["Low light leaves room for misidentification."],
+        )
+    )
+
+
+def _reinforce_real_suspect_trail(
+    truth: TruthState,
+    evidence: list,
+    primary_location_id: UUID,
+    location_name: str,
+    crime_time: int,
+) -> None:
+    if _offender_direct_confidence(truth, evidence) != ConfidenceBand.WEAK:
+        return
+    offender = next(
+        (person for person in truth.people.values() if RoleTag.OFFENDER in person.role_tags),
+        None,
+    )
+    if offender is None:
+        return
+    witnesses = sorted(
+        (person for person in truth.people.values() if RoleTag.WITNESS in person.role_tags),
+        key=lambda person: person.name,
+    )
+    if not witnesses:
+        return
+    linked_witness_ids = {
+        item.witness_id
+        for item in evidence
+        if isinstance(item, WitnessStatement)
+        and offender.id in getattr(item, "observed_person_ids", [])
+    }
+    witness = next((person for person in witnesses if person.id not in linked_witness_ids), None)
+    if witness is None:
+        return
+    time_window = (crime_time, min(23, crime_time + 1))
+    evidence.append(
+        WitnessStatement(
+            evidence_type=EvidenceType.TESTIMONIAL,
+            summary="Witness statement (corroborating)",
+            source=witness.name,
+            time_collected=crime_time + 1,
+            confidence=ConfidenceBand.MEDIUM,
+            witness_id=witness.id,
+            statement=(
+                f"I got a cleaner look this time. I saw {offender.name} near {place_with_article(location_name)} "
+                f"{_format_time_phrase(time_window)}."
+            ),
+            reported_time_window=time_window,
+            location_id=primary_location_id,
+            observed_person_ids=[offender.id],
+            uncertainty_hooks=["Second witness account; timing is tighter than the first read."],
+        )
+    )
+
+
+def _false_lead_reporter(truth: TruthState, rng: Rng):
+    candidates = []
+    for person in sorted(truth.people.values(), key=lambda candidate: candidate.name):
+        role_tags = set(person.role_tags)
+        if RoleTag.WITNESS not in role_tags:
+            continue
+        weight = 1.0
+        relationship_distance = _relationship_distance(person)
+        if relationship_distance == "intimate":
+            weight += 0.4
+        elif relationship_distance == "acquaintance":
+            weight += 0.2
+        if isinstance(person.traits, dict):
+            witness_role = str(person.traits.get("witness_role", "") or "")
+            if witness_role in {"neighbor", "resident", "security", "staff", "maintenance"}:
+                weight += 0.25
+        candidates.append((person, weight))
+    if not candidates:
+        return None
+    return rng.weighted_choice(candidates)
+
+
+def _false_lead_confidence(
+    strongest_offender_confidence: ConfidenceBand | None,
+    strong_false_trail: bool,
+) -> ConfidenceBand:
+    if strongest_offender_confidence == ConfidenceBand.STRONG and strong_false_trail:
+        return ConfidenceBand.MEDIUM
+    return ConfidenceBand.WEAK
+
+
+def _choose_false_lead_target(
+    evidence: list,
+    primary_location_id: UUID,
+    rng: Rng,
+) -> tuple[str, CCTVReport | WitnessStatement] | None:
+    candidates: list[tuple[tuple[str, CCTVReport | WitnessStatement], float]] = []
+    for item in evidence:
+        if getattr(item, "location_id", None) != primary_location_id:
+            continue
+        if getattr(item, "observed_person_ids", []):
+            continue
+        if isinstance(item, CCTVReport):
+            candidates.append((("cctv", item), 1.0))
+        elif isinstance(item, WitnessStatement) and "possible match" not in item.summary.lower():
+            candidates.append((("witness", item), 1.35))
+    if not candidates:
+        return None
+    return rng.weighted_choice(candidates)
+
+
+def _inject_false_lead(
+    truth: TruthState,
+    evidence: list,
+    primary_location_id: UUID,
+    location_name: str,
+    crime_time: int,
+    rng: Rng,
+) -> None:
+    false_suspect = _false_lead_person(truth, rng)
+    if false_suspect is None:
+        return
+    pattern_plan = _pattern_plan(truth)
+    strong_false_trail = bool(
+        pattern_plan
+        and pattern_plan.get("pattern_type") in {"copycat", "red_herring"}
+    )
+    false_confidence = _false_lead_confidence(
+        _offender_direct_confidence(truth, evidence),
+        strong_false_trail,
+    )
+    false_window = _false_lead_window(crime_time, rng)
+    target_choice = _choose_false_lead_target(
+        evidence,
+        primary_location_id,
+        rng.fork("red-herring-target"),
+    )
+    medium = "cctv"
+    target = target_choice[1] if target_choice is not None else None
+    if isinstance(target, CCTVReport):
+        target.observed_person_ids = [false_suspect.id]
+        target.time_window = false_window
+        target.confidence = false_confidence
+        target.summary = "CCTV report (possible match)"
+        medium = "cctv"
+    elif isinstance(target, WitnessStatement):
+        target.observed_person_ids = [false_suspect.id]
+        target.reported_time_window = false_window
+        target.confidence = false_confidence
+        target.summary = "Witness statement (possible match)"
+        target.statement = (
+            f"I thought it might have been {false_suspect.name} near {place_with_article(location_name)} "
+            f"{_format_time_phrase(false_window)}."
+        )
+        if "Low light leaves room for misidentification." not in target.uncertainty_hooks:
+            target.uncertainty_hooks.append("Low light leaves room for misidentification.")
+        medium = "witness"
+    else:
+        reporter = _false_lead_reporter(truth, rng.fork("red-herring-reporter"))
+        if reporter is not None and rng.random() < 0.6:
+            evidence.append(
+                WitnessStatement(
+                    evidence_type=EvidenceType.TESTIMONIAL,
+                    summary="Witness statement (possible match)",
+                    source=reporter.name,
+                    time_collected=crime_time + 1,
+                    confidence=false_confidence,
+                    witness_id=reporter.id,
+                    statement=(
+                        f"I thought it might have been {false_suspect.name} near {place_with_article(location_name)} "
+                        f"{_format_time_phrase(false_window)}."
+                    ),
+                    reported_time_window=false_window,
+                    location_id=primary_location_id,
+                    observed_person_ids=[false_suspect.id],
+                    uncertainty_hooks=["Low light leaves room for misidentification."],
+                )
+            )
+            medium = "witness"
+        else:
+            evidence.append(
+                CCTVReport(
+                evidence_type=EvidenceType.CCTV,
+                summary="CCTV report (possible match)",
+                source="Traffic Control",
+                time_collected=crime_time + 1,
+                confidence=false_confidence,
+                location_id=primary_location_id,
+                observed_person_ids=[false_suspect.id],
+                time_window=false_window,
+                )
+            )
+            medium = "cctv"
+    truth.case_meta["red_herring_suspect_id"] = str(false_suspect.id)
+    truth.case_meta["red_herring_suspect_name"] = false_suspect.name
+    truth.case_meta["red_herring_medium"] = medium
 
 
 def _rigor_stage(hours_since: int) -> str:
@@ -617,6 +899,22 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
         )
         forensics_added = True
         break
+    if not forensics_added and weapon_items:
+        contextual_result = build_contextual_lab_result(
+            weapon_items[0],
+            primary_location_id,
+            method_category,
+            access_path,
+            control_style,
+            cleanup_style,
+            exit_style,
+            competence,
+            rng.fork("contextual-lab"),
+        )
+        if contextual_result is not None:
+            contextual_result.time_collected = kill_event.timestamp + 2
+            evidence.append(contextual_result)
+            forensics_added = True
 
     if primary_poi_id:
         body_tags = list(poi_tags.get(body_poi_id, []))
@@ -1153,5 +1451,30 @@ def project_case(truth: TruthState, rng: Rng) -> PresentationCase:
                     location_id=primary_location_id,
                 )
             )
+
+    primary_location = truth.locations.get(primary_location_id)
+    _ensure_real_suspect_trail(
+        truth,
+        evidence,
+        primary_location_id,
+        primary_location.name if primary_location else "the scene",
+        kill_event.timestamp,
+        rng.fork("real-suspect"),
+    )
+    _reinforce_real_suspect_trail(
+        truth,
+        evidence,
+        primary_location_id,
+        primary_location.name if primary_location else "the scene",
+        kill_event.timestamp,
+    )
+    _inject_false_lead(
+        truth,
+        evidence,
+        primary_location_id,
+        primary_location.name if primary_location else "the scene",
+        kill_event.timestamp,
+        rng.fork("false-lead"),
+    )
 
     return PresentationCase(case_id=truth.case_id, seed=truth.seed, evidence=evidence)

@@ -44,9 +44,9 @@ def resolve_case_outcome(validation: ValidationResult) -> CaseOutcome:
         )
     return CaseOutcome(
         arrest_result=ArrestResult.FAILED,
-        trust_delta=-1,
-        pressure_delta=2,
-        notes=["Command sees this as a weak or misdirected arrest."],
+        trust_delta=-2,
+        pressure_delta=3,
+        notes=["Command sees this as a weak or misdirected arrest, and the fallout carries into the next case."],
     )
 
 

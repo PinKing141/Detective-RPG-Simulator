@@ -6,7 +6,8 @@ from collections import Counter
 from typing import Callable, Optional
 from uuid import UUID
 
-from noir.deduction.board import ClaimType, DeductionBoard, Hypothesis
+from noir.deduction.board import ClaimType, DeductionBoard, Hypothesis, ReasoningStep
+from noir.deduction.validation import ArrestTier, validate_hypothesis
 from noir.domain.enums import ConfidenceBand, EvidenceType, EventKind, RoleTag
 from noir.domain.models import Person
 from noir.investigation.costs import (
@@ -30,6 +31,13 @@ from noir.investigation.interviews import (
     InterviewTheme,
     baseline_hooks,
     build_baseline_profile,
+)
+from noir.investigation.interview_memory import (
+    apply_revisit_friction,
+    interview_summary,
+    register_interview_memory,
+    repeat_prefix,
+    revisit_note,
 )
 from noir.investigation.leads import (
     Lead,
@@ -345,6 +353,21 @@ def _interview_state(
     )
     state.interviews[key] = interview_state
     return interview_state
+
+
+def _apply_failed_arrest_backlash(
+    state: InvestigationState,
+    notes: list[str],
+    *,
+    wrong_suspect: bool,
+) -> None:
+    state.trust = int(clamp(state.trust - 1, 0, TRUST_LIMIT))
+    state.pressure = int(clamp(state.pressure + 1, 0, PRESSURE_LIMIT))
+    notes.append("Wrong-arrest fallout hits immediately: trust drops and pressure spikes.")
+    if wrong_suspect:
+        notes.append("The real offender gets time to bury the trail.")
+    else:
+        notes.append("Command sees the arrest as premature and pulls harder on the case.")
 
 
 def _kill_event(truth: TruthState):
@@ -691,13 +714,24 @@ def interview(
         neighbor_role=neighbor_role,
         relationship_closeness=relationship_closeness,
     )
+    prompt_label = None
     if dialog_choice_index is not None:
         graph = load_interview_graph(role_key)
         if graph is not None:
             node_id = interview_state.dialog_node_id or graph.root_node_id
             label = choice_label_for(graph, node_id, dialog_choice_index)
             if label:
+                prompt_label = label
                 notes.append(f"Interview prompt: {label}.")
+    repeat_count, repeated_prompt = register_interview_memory(
+        interview_state,
+        approach,
+        theme,
+        prompt_label,
+    )
+    apply_revisit_friction(interview_state, approach, repeat_count, repeated_prompt)
+    if repeat_count > 0 or repeated_prompt:
+        notes.append(revisit_note(approach, repeated_prompt))
     if interview_state.phase == InterviewPhase.SHUTDOWN:
         notes.append("The witness refuses to continue.")
         return ActionResult(
@@ -805,13 +839,33 @@ def interview(
         revealed.append(evidence)
 
     if approach == InterviewApproach.BASELINE:
-        revealed = _reveal_limited(
-            state,
-            presentation,
-            lambda item: item.evidence_type == EvidenceType.TESTIMONIAL
-            and getattr(item, "witness_id", None) == person_id,
-            limit=2,
+        candidate_statements = [
+            item
+            for item in presentation.evidence
+            if item.id not in state.knowledge.known_evidence
+            and item.evidence_type == EvidenceType.TESTIMONIAL
+            and getattr(item, "witness_id", None) == person_id
+        ]
+        confidence_rank = {
+            ConfidenceBand.STRONG: 0,
+            ConfidenceBand.MEDIUM: 1,
+            ConfidenceBand.WEAK: 2,
+        }
+        candidate_statements.sort(
+            key=lambda item: (
+                0
+                if suspect_id is not None and suspect_id in (getattr(item, "observed_person_ids", None) or [])
+                else 1,
+                0 if item.summary == "Witness statement (corroborating)" else 1,
+                0 if item.summary == "Witness statement" else 1,
+                0 if getattr(item, "observed_person_ids", None) else 1,
+                confidence_rank.get(item.confidence, 3),
+            )
         )
+        revealed = []
+        for item in candidate_statements[:2]:
+            state.knowledge.known_evidence.append(item.id)
+            revealed.append(item)
         if revealed and interview_state.baseline_profile is None:
             interview_state.baseline_profile = build_baseline_profile(revealed[0].statement)
         if interview_state.baseline_profile is None and base_statement:
@@ -871,20 +925,23 @@ def interview(
             first = revealed[0]
             if isinstance(first, WitnessStatement):
                 detail_window = first.reported_time_window
-        _maybe_add_detail_statement(revealed, detail_window)
+        if repeat_count <= 0 and not repeated_prompt:
+            _maybe_add_detail_statement(revealed, detail_window)
         lead = lead_for_type(state, EvidenceType.TESTIMONIAL)
         if lead and lead.status == LeadStatus.EXPIRED and revealed:
             notes.extend(apply_lead_decay(lead, revealed))
         elif revealed:
             mark_lead_resolved(state, EvidenceType.TESTIMONIAL)
         notes.extend(_apply_cooperation_decay(state, revealed))
-        summary = f"Interview ({approach.value}) yields a usable statement."
-        if not revealed:
-            summary = f"Interview ({approach.value}) adds nothing new."
         return ActionResult(
             action=ActionType.INTERVIEW,
             outcome=ActionOutcome.SUCCESS,
-            summary=summary,
+            summary=interview_summary(
+                approach,
+                revealed,
+                repeat_count,
+                repeated_prompt,
+            ),
             time_cost=time_cost,
             pressure_cost=pressure_cost,
             cooperation_change=coop_delta,
@@ -1062,6 +1119,13 @@ def interview(
             )
             if dialog_statement:
                 statement = dialog_statement
+        statement = repeat_prefix(
+            statement,
+            approach,
+            theme,
+            repeat_count,
+            repeated_prompt,
+        )
         if confession and truth_seen and suspect_id:
             observed_person_ids = [suspect_id]
 
@@ -1097,7 +1161,8 @@ def interview(
     if detail_window is None and kill_event:
         detail_rng = _interview_rng(truth, person_id, f"detail:{state.time}:followup")
         detail_window = fuzz_time(kill_event.timestamp, sigma=2.5, rng=detail_rng)
-    _maybe_add_detail_statement(revealed, detail_window)
+    if repeat_count <= 0 and not repeated_prompt:
+        _maybe_add_detail_statement(revealed, detail_window)
 
     lead = lead_for_type(state, EvidenceType.TESTIMONIAL)
     if lead and lead.status == LeadStatus.EXPIRED and revealed:
@@ -1105,13 +1170,15 @@ def interview(
     elif revealed:
         mark_lead_resolved(state, EvidenceType.TESTIMONIAL)
     notes.extend(_apply_cooperation_decay(state, revealed))
-    summary = f"Interview ({approach.value}) yields a usable statement."
-    if not revealed:
-        summary = f"Interview ({approach.value}) adds nothing new."
     return ActionResult(
         action=ActionType.INTERVIEW,
         outcome=ActionOutcome.SUCCESS,
-        summary=summary,
+        summary=interview_summary(
+            approach,
+            revealed,
+            repeat_count,
+            repeated_prompt,
+        ),
         time_cost=time_cost,
         pressure_cost=pressure_cost,
         cooperation_change=coop_delta,
@@ -1863,7 +1930,8 @@ def arrest(
     state: InvestigationState,
     person_id: UUID,
     location_id: UUID,
-    has_hypothesis: bool,
+    has_hypothesis: bool = False,
+    board: DeductionBoard | None = None,
 ) -> ActionResult:
     if not has_hypothesis:
         return ActionResult(
@@ -1884,17 +1952,47 @@ def arrest(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    validation = None
+    if board is not None:
+        board.sync_from_state(state)
+        validation = validate_hypothesis(truth, board, presentation, state)
     apply_action(
         truth,
         EventKind.ARREST,
         state.time,
         location_id,
         participants=[person_id],
-        metadata={"action": "arrest", "person_id": str(person_id)},
+        metadata={
+            "action": "arrest",
+            "person_id": str(person_id),
+            "arrest_tier": validation.tier.value if validation is not None else "",
+            "probable_cause": str(validation.probable_cause).lower()
+            if validation is not None
+            else "",
+        },
     )
     notes = update_lead_statuses(state)
     outcome = ActionOutcome.SUCCESS
-    summary = "Arrest attempted."
+    summary = "Arrest executed."
+    if validation is not None:
+        wrong_suspect = not validation.is_correct_suspect
+        failed_arrest = (
+            wrong_suspect
+            or not validation.probable_cause
+            or validation.tier == ArrestTier.FAILED
+        )
+        if failed_arrest:
+            _apply_failed_arrest_backlash(state, notes, wrong_suspect=wrong_suspect)
+            if wrong_suspect:
+                summary = "Wrong suspect arrested. Trust drops and pressure spikes."
+            else:
+                summary = "Arrest backfires. The case is too thin to hold."
+            outcome = ActionOutcome.FAILURE
+        elif validation.tier == ArrestTier.SHAKY:
+            summary = "Arrest made on shaky grounds."
+            notes.append("Command authorizes the collar, but the case still looks thin.")
+        else:
+            notes.append("Command signs off on the arrest.")
     return ActionResult(
         action=ActionType.ARREST,
         outcome=outcome,
@@ -1912,7 +2010,9 @@ def set_hypothesis(
     suspect_id: UUID,
     claims: list[ClaimType],
     evidence_ids: list[UUID],
+    reasoning_steps: list[ReasoningStep] | None = None,
 ) -> ActionResult:
+    reasoning_steps = list(reasoning_steps or [])
     if len(evidence_ids) < 1 or len(evidence_ids) > 3:
         return ActionResult(
             action=ActionType.SET_HYPOTHESIS,
@@ -1941,6 +2041,35 @@ def set_hypothesis(
             pressure_cost=0,
             cooperation_change=0.0,
         )
+    claim_list = list(dict.fromkeys(claims))
+    if len(reasoning_steps) < len(claim_list):
+        return ActionResult(
+            action=ActionType.SET_HYPOTHESIS,
+            outcome=ActionOutcome.FAILURE,
+            summary="Hypothesis not set. Every claim needs a reasoning link to selected evidence.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    if any(step.evidence_id not in set(evidence_ids) for step in reasoning_steps):
+        return ActionResult(
+            action=ActionType.SET_HYPOTHESIS,
+            outcome=ActionOutcome.FAILURE,
+            summary="Hypothesis reasoning references evidence outside the selected set.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
+    covered_claims = {step.claim for step in reasoning_steps}
+    if not set(claim_list).issubset(covered_claims):
+        return ActionResult(
+            action=ActionType.SET_HYPOTHESIS,
+            outcome=ActionOutcome.FAILURE,
+            summary="Hypothesis not set. Every claim needs an explicit reasoning link.",
+            time_cost=0,
+            pressure_cost=0,
+            cooperation_change=0.0,
+        )
 
     blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
         state, ActionType.SET_HYPOTHESIS
@@ -1959,10 +2088,11 @@ def set_hypothesis(
     _mark_style(state, "analytical")
     board.hypothesis = Hypothesis(
         suspect_id=suspect_id,
-        claims=list(dict.fromkeys(claims)),
+        claims=claim_list,
         evidence_ids=list(evidence_ids),
+        reasoning_steps=reasoning_steps,
     )
-    summary = "Hypothesis submitted."
+    summary = "Hypothesis submitted with an explicit reasoning chain."
     return ActionResult(
         action=ActionType.SET_HYPOTHESIS,
         outcome=ActionOutcome.SUCCESS,

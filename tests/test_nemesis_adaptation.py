@@ -1,3 +1,10 @@
+from uuid import uuid4
+
+from noir.domain.enums import ConfidenceBand, EvidenceType
+from noir.investigation.costs import ActionType
+from noir.investigation.runtime import apply_runtime_rules
+from noir.investigation.results import ActionOutcome, ActionResult, InvestigationState
+from noir.nemesis.director_hooks import apply_nemesis_runtime_interference
 from noir.nemesis.state import (
 	NemesisComponent,
 	NemesisComponentType,
@@ -7,7 +14,9 @@ from noir.nemesis.state import (
 	apply_nemesis_case_outcome,
 	plan_nemesis_case,
 )
+from noir.presentation.evidence import ForensicObservation
 from noir.util.rng import Rng
+from noir.world.state import WorldState
 
 
 def _component(
@@ -163,3 +172,92 @@ def test_failed_case_uses_counterplay_tone_when_present() -> None:
 	)
 
 	assert state.profile.failure_echo == "baiting"
+
+
+def test_runtime_interference_perturbs_first_eligible_action() -> None:
+	state = InvestigationState()
+	result = ActionResult(
+		action=ActionType.VISIT_SCENE,
+		outcome=ActionOutcome.SUCCESS,
+		summary="You document the scene.",
+		time_cost=1,
+		pressure_cost=0,
+		cooperation_change=0.0,
+		revealed=[
+			ForensicObservation(
+				evidence_type=EvidenceType.FORENSICS,
+				summary="Forensic observation",
+				source="Scene Unit",
+				time_collected=1,
+				confidence=ConfidenceBand.MEDIUM,
+				observation="Light scuffing suggests recent movement.",
+				location_id=uuid4(),
+			)
+		],
+	)
+
+	notes = apply_nemesis_runtime_interference(
+		{
+			"nemesis_case": True,
+			"nemesis_components": {
+				"approach": "lure",
+				"control": "intimidation",
+				"method": "sharp",
+				"cleanup": "wipe",
+				"exit": "misdirection",
+			},
+		},
+		state,
+		result,
+	)
+
+	assert notes
+	assert result.revealed[0].confidence == ConfidenceBand.WEAK
+	assert state.pressure == 1
+	assert any("scene looks lightly scrubbed" in note.lower() for note in notes)
+	assert apply_nemesis_runtime_interference({"nemesis_case": True}, state, result) == []
+
+
+def test_runtime_rules_apply_shared_nemesis_effects() -> None:
+	state = InvestigationState()
+	world = WorldState()
+	result = ActionResult(
+		action=ActionType.VISIT_SCENE,
+		outcome=ActionOutcome.SUCCESS,
+		summary="You document the scene.",
+		time_cost=1,
+		pressure_cost=0,
+		cooperation_change=0.0,
+		revealed=[
+			ForensicObservation(
+				evidence_type=EvidenceType.FORENSICS,
+				summary="Forensic observation",
+				source="Scene Unit",
+				time_collected=1,
+				confidence=ConfidenceBand.MEDIUM,
+				observation="Light scuffing suggests recent movement.",
+				location_id=uuid4(),
+			)
+		],
+	)
+
+	apply_runtime_rules(
+		{
+			"nemesis_case": True,
+			"nemesis_components": {
+				"approach": "lure",
+				"control": "intimidation",
+				"method": "sharp",
+				"cleanup": "wipe",
+				"exit": "misdirection",
+			},
+		},
+		state,
+		result,
+		world=world,
+		district="harbor",
+	)
+
+	assert result.revealed[0].confidence == ConfidenceBand.WEAK
+	assert state.pressure == 1
+	assert "Nemesis interference cuts into the result." in result.summary

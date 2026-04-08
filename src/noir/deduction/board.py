@@ -17,10 +17,18 @@ class ClaimType(StrEnum):
 
 
 @dataclass(frozen=True)
+class ReasoningStep:
+    claim: ClaimType
+    evidence_id: UUID
+    note: str
+
+
+@dataclass(frozen=True)
 class Hypothesis:
     suspect_id: UUID
     claims: list[ClaimType]
     evidence_ids: list[UUID]
+    reasoning_steps: list[ReasoningStep] = field(default_factory=list)
 
 
 @dataclass

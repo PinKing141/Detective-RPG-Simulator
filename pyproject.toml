@@ -1,3 +1,7 @@
+ [build-system]
+ requires = ["setuptools>=68", "wheel"]
+ build-backend = "setuptools.build_meta"
+
 [project]
 name = "detective-rpg-simulator"
 version = "0.1.0"
@@ -14,6 +18,22 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+
+[project.scripts]
+detective-play = "noir.cli.run_textual:main"
+detective-dump-truth = "noir.tools.dump_truth:main"
+detective-profile-case = "noir.tools.profile_case:main"
+detective-run-game = "noir.cli.run_game:main"
+detective-run-seed = "noir.tools.run_seed:main"
+detective-run-textual = "noir.cli.run_textual:main"
+detective-sweep-case-quality = "noir.tools.sweep_case_quality:main"
+detective-validate-paths = "noir.tools.validate_paths:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

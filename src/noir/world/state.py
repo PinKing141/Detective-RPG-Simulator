@@ -236,6 +236,28 @@ class WorldState:
             lead_deadline_delta = max(lead_deadline_delta, 1)
         briefing_lines: list[str] = []
         briefing_lines.extend(self.context_lines(district, location_name))
+        recent_case = self.case_history[-1] if self.case_history else None
+        if recent_case is not None:
+            if recent_case.outcome == ArrestResult.FAILED.value:
+                cooperation = clamp(cooperation - 0.15, 0.2, 1.0)
+                lead_deadline_delta = max(lead_deadline_delta, 2)
+                briefing_lines.append(
+                    "Wrong-arrest fallout carries over: witnesses are tighter and command wants a faster correction."
+                )
+            elif recent_case.outcome == ArrestResult.SUCCESS.value:
+                cooperation = clamp(cooperation + 0.05, 0.2, 1.0)
+                briefing_lines.append(
+                    "Last case bought you a little breathing room; people are more willing to talk."
+                )
+            else:
+                briefing_lines.append(
+                    "Last case held, but only barely; command wants cleaner proof this time."
+                )
+        closing = self.campaign.closing_in
+        if closing.pattern or closing.narrowing or closing.proof:
+            briefing_lines.append(
+                "The pattern board is still live; this case starts under the weight of what you already know."
+            )
         return CaseStartModifiers(
             cooperation=cooperation,
             lead_deadline_delta=lead_deadline_delta,

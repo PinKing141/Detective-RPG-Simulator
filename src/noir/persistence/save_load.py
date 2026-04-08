@@ -6,6 +6,8 @@ from pathlib import Path
 import json
 from uuid import UUID
 
+from noir.deduction.board import ClaimType, Hypothesis, ReasoningStep
+from noir.deduction.scoring import auto_build_reasoning_steps, supports_reasoning_step
 from noir.investigation.interviews import BaselineProfile, InterviewPhase, InterviewState
 from noir.investigation.leads import Lead, LeadStatus, NeighborLead
 from noir.investigation.results import InvestigationState, LocationState
@@ -50,6 +52,7 @@ def save_investigation(
 	seed: int,
 	state: InvestigationState,
 	presentation: PresentationCase,
+	hypothesis: Hypothesis | None = None,
 	path: Path | None = None,
 ) -> Path:
 	payload = {
@@ -58,6 +61,7 @@ def save_investigation(
 		"seed": int(seed),
 		"state": _serialize_state(state),
 		"presentation": _serialize_presentation(presentation),
+		"hypothesis": _serialize_hypothesis(hypothesis),
 	}
 	save_path = _save_path(case_id, path)
 	save_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -67,7 +71,7 @@ def save_investigation(
 def load_investigation(
 	case_id: str,
 	path: Path | None = None,
-) -> tuple[int, InvestigationState, PresentationCase] | None:
+) -> tuple[int, InvestigationState, PresentationCase, Hypothesis | None] | None:
 	save_path = _save_path(case_id, path)
 	if not save_path.exists():
 		return None
@@ -80,7 +84,73 @@ def load_investigation(
 	seed = int(payload.get("seed", 0))
 	state = _deserialize_state(payload.get("state", {}) or {})
 	presentation = _deserialize_presentation(payload.get("presentation", {}) or {})
-	return seed, state, presentation
+	hypothesis = _deserialize_hypothesis(payload.get("hypothesis"))
+	return seed, state, presentation, hypothesis
+
+
+def restore_saved_hypothesis(
+	hypothesis: Hypothesis | None,
+	presentation: PresentationCase,
+	state: InvestigationState,
+	*,
+	truth=None,
+) -> tuple[Hypothesis | None, str | None]:
+	if hypothesis is None:
+		return None, None
+	evidence_by_id = {item.id for item in presentation.evidence}
+	known_ids = set(state.knowledge.known_evidence)
+	claims = list(dict.fromkeys(hypothesis.claims))
+	evidence_ids = [
+		evidence_id
+		for evidence_id in dict.fromkeys(hypothesis.evidence_ids)
+		if evidence_id in evidence_by_id and evidence_id in known_ids
+	]
+	if not claims or not evidence_ids:
+		return None, "Saved hypothesis no longer matched collected evidence and was cleared."
+
+	selected_ids = set(evidence_ids)
+	steps_by_claim: dict[ClaimType, ReasoningStep] = {}
+	for step in hypothesis.reasoning_steps:
+		if step.claim not in claims:
+			continue
+		if step.evidence_id not in selected_ids:
+			continue
+		supported, _ = supports_reasoning_step(
+			presentation,
+			step.evidence_id,
+			hypothesis.suspect_id,
+			step.claim,
+			truth=truth,
+			state=state,
+		)
+		if not supported:
+			continue
+		steps_by_claim.setdefault(step.claim, step)
+
+	if not set(claims).issubset(steps_by_claim):
+		for step in auto_build_reasoning_steps(
+			presentation,
+			evidence_ids,
+			hypothesis.suspect_id,
+			claims,
+			truth=truth,
+			state=state,
+		):
+			steps_by_claim.setdefault(step.claim, step)
+
+	reasoning_steps = [steps_by_claim[claim] for claim in claims if claim in steps_by_claim]
+	if not set(claims).issubset({step.claim for step in reasoning_steps}):
+		return None, "Saved hypothesis could not be migrated to the current reasoning format and was cleared."
+
+	restored = Hypothesis(
+		suspect_id=hypothesis.suspect_id,
+		claims=claims,
+		evidence_ids=evidence_ids,
+		reasoning_steps=reasoning_steps,
+	)
+	if restored == hypothesis:
+		return restored, None
+	return restored, "Saved hypothesis was migrated to the current reasoning format."
 
 
 def has_save(case_id: str, path: Path | None = None) -> bool:
@@ -255,6 +325,9 @@ def _serialize_interview_state(state: InterviewState) -> dict:
 		"motive_to_lie": state.motive_to_lie,
 		"contradiction_emitted": state.contradiction_emitted,
 		"dialog_node_id": state.dialog_node_id,
+		"approach_counts": dict(state.approach_counts),
+		"approach_history": list(state.approach_history),
+		"prompt_history": list(state.prompt_history),
 	}
 
 
@@ -277,6 +350,12 @@ def _deserialize_interview_state(payload: dict) -> InterviewState:
 		motive_to_lie=bool(payload.get("motive_to_lie", False)),
 		contradiction_emitted=bool(payload.get("contradiction_emitted", False)),
 		dialog_node_id=payload.get("dialog_node_id"),
+		approach_counts={
+			str(key): int(value)
+			for key, value in (payload.get("approach_counts", {}) or {}).items()
+		},
+		approach_history=list(payload.get("approach_history", []) or []),
+		prompt_history=list(payload.get("prompt_history", []) or []),
 	)
 
 
@@ -306,6 +385,49 @@ def _uuid_or_none(value: str | None) -> UUID | None:
 	if not value:
 		return None
 	return UUID(str(value))
+
+
+def _serialize_hypothesis(hypothesis: Hypothesis | None) -> dict | None:
+	if hypothesis is None:
+		return None
+	return {
+		"suspect_id": str(hypothesis.suspect_id),
+		"claims": [claim.value for claim in hypothesis.claims],
+		"evidence_ids": [str(value) for value in hypothesis.evidence_ids],
+		"reasoning_steps": [
+			_serialize_reasoning_step(step) for step in hypothesis.reasoning_steps
+		],
+	}
+
+
+def _deserialize_hypothesis(payload: dict | None) -> Hypothesis | None:
+	if not payload:
+		return None
+	return Hypothesis(
+		suspect_id=UUID(str(payload.get("suspect_id"))),
+		claims=[ClaimType(str(value)) for value in (payload.get("claims", []) or [])],
+		evidence_ids=[UUID(str(value)) for value in (payload.get("evidence_ids", []) or [])],
+		reasoning_steps=[
+			_deserialize_reasoning_step(step)
+			for step in (payload.get("reasoning_steps", []) or [])
+		],
+	)
+
+
+def _serialize_reasoning_step(step: ReasoningStep) -> dict:
+	return {
+		"claim": step.claim.value,
+		"evidence_id": str(step.evidence_id),
+		"note": step.note,
+	}
+
+
+def _deserialize_reasoning_step(payload: dict) -> ReasoningStep:
+	return ReasoningStep(
+		claim=ClaimType(str(payload.get("claim", ClaimType.PRESENCE.value))),
+		evidence_id=UUID(str(payload.get("evidence_id"))),
+		note=str(payload.get("note", "")),
+	)
 
 
 def _serialize_presentation(presentation: PresentationCase) -> dict:

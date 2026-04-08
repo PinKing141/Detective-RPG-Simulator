@@ -70,6 +70,7 @@ Flow:
 
 ## Deduction validation
 - Player builds a hypothesis graph from evidence.
+- Every claim in the hypothesis must point to selected evidence through an explicit reasoning step.
 - Validation uses ontology mapping and soft matching for partial credit.
   - Example: STABBED matches ATTACKED_WITH_SHARP_OBJECT.
 
@@ -109,5 +110,6 @@ Flow:
 - Violations fail early and loudly.
 
 ## Persistence contract
-- Save files store: seed, truth snapshot, presentation state, clocks, and hypothesis state.
+- Save files store: seed, presentation state, investigation clocks, interview memory, and hypothesis state.
+- Hypothesis state includes the selected evidence set and the explicit reasoning steps that tie evidence to claims.
 - Load never re-simulates unless explicitly requested.

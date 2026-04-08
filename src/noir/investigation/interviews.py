@@ -48,6 +48,9 @@ class InterviewState:
     motive_to_lie: bool = False
     contradiction_emitted: bool = False
     dialog_node_id: str | None = None
+    approach_counts: dict[str, int] = field(default_factory=dict)
+    approach_history: list[str] = field(default_factory=list)
+    prompt_history: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

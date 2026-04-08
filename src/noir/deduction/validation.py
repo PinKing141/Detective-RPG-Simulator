@@ -7,7 +7,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from noir.deduction.board import ClaimType, DeductionBoard
-from noir.deduction.scoring import support_for_claims
+from noir.deduction.scoring import support_for_claims, supports_reasoning_step
 from noir.domain.enums import RoleTag
 from noir.investigation.results import InvestigationState
 from noir.investigation.thresholds import evaluate_arrest
@@ -140,6 +140,63 @@ def _arrest_tier(
     return tier, classes
 
 
+def _reasoning_chain_valid(
+    hypothesis,
+    presentation,
+    truth,
+    state,
+) -> tuple[list[str], list[str], bool]:
+    supports: list[str] = []
+    missing: list[str] = []
+    valid = True
+    selected_ids = set(hypothesis.evidence_ids)
+    steps_by_claim: dict[ClaimType, list] = {claim: [] for claim in hypothesis.claims}
+    for step in hypothesis.reasoning_steps:
+        if step.claim in steps_by_claim:
+            steps_by_claim[step.claim].append(step)
+
+    for claim in hypothesis.claims:
+        steps = steps_by_claim.get(claim, [])
+        if not steps:
+            _append_unique(
+                missing,
+                f"No reasoning step ties evidence to the {claim.value} claim.",
+            )
+            valid = False
+            continue
+        claim_supported = False
+        for step in steps:
+            if step.evidence_id not in selected_ids:
+                _append_unique(
+                    missing,
+                    "Reasoning chain references evidence outside the selected set.",
+                )
+                valid = False
+                continue
+            supported, explanation = supports_reasoning_step(
+                presentation,
+                step.evidence_id,
+                hypothesis.suspect_id,
+                step.claim,
+                truth=truth,
+                state=state,
+            )
+            if supported:
+                claim_supported = True
+                _append_unique(supports, explanation)
+            else:
+                _append_unique(missing, explanation)
+        if not claim_supported:
+            valid = False
+
+    if len({step.evidence_id for step in hypothesis.reasoning_steps}) == 1 and len(hypothesis.claims) > 1:
+        _append_unique(
+            missing,
+            "Reasoning chain leans on a single piece of evidence for multiple claims.",
+        )
+    return supports, missing, valid
+
+
 def validate_hypothesis(
     truth: TruthState,
     board: DeductionBoard,
@@ -172,6 +229,16 @@ def validate_hypothesis(
     )
     supports = list(claim_support.supports)
     missing = list(claim_support.missing)
+    reasoning_supports, reasoning_missing, reasoning_valid = _reasoning_chain_valid(
+        hypothesis,
+        presentation,
+        truth,
+        state,
+    )
+    for line in reasoning_supports:
+        _append_unique(supports, line)
+    for line in reasoning_missing:
+        _append_unique(missing, line)
 
     classes, class_counts, class_labels = _evidence_class_profile(
         presentation, hypothesis.evidence_ids
@@ -190,6 +257,8 @@ def validate_hypothesis(
         has_conflict,
     )
     if not arrest_assessment.is_probable:
+        tier = ArrestTier.FAILED
+    if not reasoning_valid:
         tier = ArrestTier.FAILED
     if "testimonial" in classes and "physical" not in classes and "temporal" not in classes:
         _append_unique(missing, "No physical corroboration anchors the account.")
@@ -226,6 +295,8 @@ def validate_hypothesis(
         summary = "Arrest collapses. The case is not supported."
 
     notes = list(arrest_assessment.explanation)
+    if reasoning_valid:
+        notes.append("Reasoning chain is explicit enough to review.")
     return ValidationResult(
         is_correct_suspect=is_correct,
         probable_cause=arrest_assessment.is_probable,

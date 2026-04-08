@@ -1,6 +1,7 @@
+from noir.investigation.outcomes import ArrestResult, CaseOutcome
 from noir.showrunner.pacing import SEASON_EPISODE_COUNT, schedule_case_payload, season_beat_for_episode
 from noir.showrunner.scheduler import advance_episode, ensure_case_queue
-from noir.world.state import CampaignState
+from noir.world.state import CampaignState, WorldState
 
 
 def test_schedule_case_payload_uses_wave_and_cooldowns() -> None:
@@ -34,3 +35,27 @@ def test_scheduler_builds_season_aware_queue_payloads() -> None:
 
     assert [payload["season"] for payload in campaign.case_queue] == ["2", "2", "3"]
     assert [payload["episode"] for payload in campaign.case_queue] == ["4", "5", "1"]
+
+
+def test_case_start_modifiers_reflect_recent_failed_case() -> None:
+    world = WorldState()
+    world.apply_case_outcome(
+        CaseOutcome(
+            arrest_result=ArrestResult.FAILED,
+            trust_delta=-2,
+            pressure_delta=3,
+            notes=["Wrong arrest burned the room."],
+        ),
+        case_id="case_failed",
+        seed=7,
+        district="harbor",
+        location_name="Dock Office",
+        started_tick=0,
+        ended_tick=4,
+    )
+
+    modifiers = world.case_start_modifiers("harbor", "Dock Office")
+
+    assert modifiers.cooperation < 0.6
+    assert modifiers.lead_deadline_delta >= 2
+    assert any("Wrong-arrest fallout carries over" in line for line in modifiers.briefing_lines)

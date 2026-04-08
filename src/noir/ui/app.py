@@ -12,8 +12,13 @@ from textual.widgets import Input, ListItem, ListView, RichLog, Static
 from noir import config
 from noir.cases.archetypes import CaseArchetype
 from noir.cases.truth_generator import generate_case
-from noir.deduction.board import ClaimType, DeductionBoard
-from noir.deduction.scoring import support_for_claims
+from noir.deduction.board import ClaimType, DeductionBoard, ReasoningStep
+from noir.deduction.scoring import (
+    describe_reasoning_step,
+    recommended_hypothesis_evidence_ids,
+    support_for_claims,
+    suspect_candidate_ids,
+)
 from noir.deduction.validation import validate_hypothesis
 from noir.domain.enums import RoleTag
 from noir.investigation.actions import (
@@ -36,6 +41,8 @@ from noir.investigation.actions import (
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
 from noir.investigation.dialog_graph import load_interview_graph, resolve_dialog_role_key
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
+from noir.investigation.guidance import investigation_guidance_lines
+from noir.investigation.runtime import apply_runtime_rules
 from noir.investigation.leads import (
     LeadStatus,
     build_leads,
@@ -86,7 +93,13 @@ from noir.profiling.summary import build_profiling_summary, format_profiling_sum
 from noir.util.rng import Rng
 from noir.util.grammar import dedupe_lines, normalize_line
 from noir.persistence.db import WorldStore
-from noir.persistence.save_load import delete_save, has_save, load_investigation, save_investigation
+from noir.persistence.save_load import (
+    delete_save,
+    has_save,
+    load_investigation,
+    restore_saved_hypothesis,
+    save_investigation,
+)
 from noir.world.autonomy import apply_autonomy
 from noir.world.state import CaseStartModifiers, EndgameState, PersonRecord, WorldState
 
@@ -1162,6 +1175,7 @@ class Phase05App(App):
             self.seed,
             self.state,
             self.presentation,
+            hypothesis=self.board.hypothesis,
         )
         self._write(f"Investigation saved to {save_path}.")
         self._refresh_actions()
@@ -1177,7 +1191,7 @@ class Phase05App(App):
             if announce:
                 self._write("No saved investigation exists for this case.")
             return False
-        loaded_seed, loaded_state, loaded_presentation = loaded
+        loaded_seed, loaded_state, loaded_presentation, loaded_hypothesis = loaded
         if loaded_seed != self.seed:
             if announce:
                 self._write(
@@ -1186,7 +1200,13 @@ class Phase05App(App):
             return False
         self.state = loaded_state
         self.presentation = loaded_presentation
-        self.board = DeductionBoard()
+        restored_hypothesis, restore_note = restore_saved_hypothesis(
+            loaded_hypothesis,
+            loaded_presentation,
+            loaded_state,
+            truth=self.truth,
+        )
+        self.board = DeductionBoard(hypothesis=restored_hypothesis)
         self.board.sync_from_state(self.state)
         self.selected_evidence_id = (
             self.state.knowledge.known_evidence[0]
@@ -1195,7 +1215,10 @@ class Phase05App(App):
         )
         self._sync_active_location_from_state()
         if announce:
-            self._write(f"Loaded saved investigation for {self.truth.case_id}.")
+            message = f"Loaded saved investigation for {self.truth.case_id}."
+            if restore_note:
+                message = f"{message} {restore_note}"
+            self._write(message)
         if refresh and self._has_mounted:
             self._refresh_header()
             self._refresh_lists()
@@ -1226,6 +1249,21 @@ class Phase05App(App):
             lines.append(f"{item.summary} ({self._format_confidence(item.confidence)})")
         return lines
 
+    def _hypothesis_reasoning_lines(self) -> list[str]:
+        if self.board.hypothesis is None:
+            return []
+        lines: list[str] = []
+        for step in self.board.hypothesis.reasoning_steps:
+            item = next(
+                (candidate for candidate in self.presentation.evidence if candidate.id == step.evidence_id),
+                None,
+            )
+            evidence_label = item.summary if item is not None else "missing evidence"
+            lines.append(
+                f"{self._format_claim(step.claim)} <- {evidence_label}"
+            )
+        return lines
+
     def _hypothesis_lines(self) -> list[str]:
         if self.board.hypothesis is None:
             return ["Hypothesis: (none)"]
@@ -1237,6 +1275,8 @@ class Phase05App(App):
             support_summary = ", ".join(evidence_lines)
         else:
             support_summary = "(none)"
+        reasoning_lines = self._hypothesis_reasoning_lines()
+        reasoning_summary = "; ".join(reasoning_lines) if reasoning_lines else "(none)"
         claim_support = support_for_claims(
             self.presentation,
             self.board.hypothesis.evidence_ids,
@@ -1250,6 +1290,7 @@ class Phase05App(App):
             f"Hypothesis: {suspect_name}",
             f"Claims: {claims or '(none)'}",
             f"Support: {support_summary}",
+            f"Reasoning: {reasoning_summary}",
             f"Gaps: {gap_summary}",
         ]
 
@@ -1380,6 +1421,7 @@ class Phase05App(App):
                 self.board.hypothesis.suspect_id,
                 self.location_id,
                 has_hypothesis=True,
+                board=self.board,
             )
             self._apply_action_result(result)
             if result.action == ActionType.ARREST:
@@ -1494,9 +1536,13 @@ class Phase05App(App):
         self._write("Unknown action.")
 
     def _apply_action_result(self, result) -> None:
-        autonomy_notes = apply_autonomy(self.state, self.world, self.district)
-        if autonomy_notes:
-            result.notes.extend(autonomy_notes)
+        result = apply_runtime_rules(
+            self.case_facts,
+            self.state,
+            result,
+            world=self.world,
+            district=self.district,
+        )
         if result.action in {ActionType.SET_HYPOTHESIS, ActionType.SET_PROFILE} and result.outcome == ActionOutcome.SUCCESS:
             self._write(
                 f"{result.summary} (+{result.time_cost} time, +{result.pressure_cost} pressure)"
@@ -1523,6 +1569,19 @@ class Phase05App(App):
                 )
         for note in result.notes:
             self._write(f"- {note}")
+        if (
+            result.outcome == ActionOutcome.SUCCESS
+            and self.board.hypothesis is None
+            and result.action in {
+                ActionType.INTERVIEW,
+                ActionType.FOLLOW_NEIGHBOR,
+                ActionType.REQUEST_CCTV,
+                ActionType.SUBMIT_FORENSICS,
+                ActionType.VISIT_SCENE,
+            }
+        ):
+            for line in investigation_guidance_lines(self.truth, self.presentation, self.state):
+                self._write(f"Guidance: {line}")
         if result.revealed:
             self.selected_evidence_id = result.revealed[0].id
         elif self.selected_evidence_id is None and self.state.knowledge.known_evidence:
@@ -1934,7 +1993,16 @@ class Phase05App(App):
 
     def _start_hypothesis_prompt(self) -> None:
         self.board.sync_from_state(self.state)
-        suspects = [p for p in self.truth.people.values() if RoleTag.OFFENDER in p.role_tags]
+        candidate_ids = suspect_candidate_ids(
+            self.truth,
+            self.presentation,
+            self.board.known_evidence_ids,
+        )
+        suspects = [
+            self.truth.people[person_id]
+            for person_id in candidate_ids
+            if person_id in self.truth.people
+        ]
         if not suspects:
             self._write("No suspect available.")
             return
@@ -1945,16 +2013,50 @@ class Phase05App(App):
         self._set_prompt("Hypothesis suspect", lines)
         self._set_prompt_active(True)
 
+    def _set_hypothesis_reasoning_prompt(self) -> None:
+        if self.prompt_state is None:
+            return
+        claim_index = int(self.prompt_state.data.get("reasoning_index", 0))
+        claims = list(self.prompt_state.data.get("claims", []))
+        if claim_index >= len(claims):
+            return
+        claim = claims[claim_index]
+        selected_ids = set(self.prompt_state.data.get("evidence_ids", []))
+        evidence_items = [
+            item for item in self.presentation.evidence if item.id in selected_ids
+        ]
+        self.prompt_state.step = "hyp_reasoning"
+        self.prompt_state.options = evidence_items
+        lines = [
+            f"Link evidence to claim: {self._format_claim(claim)}",
+            "Choose one evidence item for this claim:",
+        ]
+        for idx, item in enumerate(evidence_items, start=1):
+            detail_lines = self._format_evidence_detail(idx, item)
+            lines.extend(detail_lines)
+            lines.append("")
+        if lines and lines[-1] == "":
+            lines.pop()
+        self._set_prompt("Hypothesis reasoning", lines)
+
     def _set_evidence_prompt(
         self,
         title: str,
         step: str,
         data: dict[str, Any],
         evidence_items: list[Any],
+        recommended_ids: list[Any] | None = None,
     ) -> None:
+        recommended_set = set(recommended_ids or [])
+        evidence_items = sorted(
+            evidence_items,
+            key=lambda item: (0 if item.id in recommended_set else 1, self.presentation.evidence.index(item)),
+        )
         self.prompt_state = PromptState(step=step, data=data, options=evidence_items)
         lines = ["Choose 1 to 3 evidence items (comma-separated):"]
         for idx, item in enumerate(evidence_items, start=1):
+            if item.id in recommended_set:
+                lines.append("Recommended for the current theory.")
             detail_lines = self._format_evidence_detail(idx, item)
             lines.extend(detail_lines)
             lines.append("")
@@ -2326,23 +2428,62 @@ class Phase05App(App):
             evidence_items = [
                 item for item in self.presentation.evidence if item.id in set(self.board.known_evidence_ids)
             ]
+            recommended_ids = recommended_hypothesis_evidence_ids(
+                self.presentation,
+                self.board.known_evidence_ids,
+                self.prompt_state.data["suspect_id"],
+                self.prompt_state.data["claims"],
+                truth=self.truth,
+                state=self.state,
+                limit=3,
+            )
             self.prompt_state.options = evidence_items
             if not evidence_items:
                 self._write("No evidence collected yet.")
                 self.prompt_state = None
                 self._set_prompt_active(False)
                 return
-            lines = ["Choose 1 to 3 evidence items (comma-separated):"]
-            for idx, item in enumerate(evidence_items, start=1):
-                detail_lines = self._format_evidence_detail(idx, item)
-                lines.extend(detail_lines)
-                lines.append("")
-            if lines and lines[-1] == "":
-                lines.pop()
-            self._set_prompt("Hypothesis evidence", lines)
+            self._set_evidence_prompt(
+                "Hypothesis evidence",
+                "hyp_evidence",
+                self.prompt_state.data,
+                evidence_items,
+                recommended_ids=recommended_ids,
+            )
             return
         if step == "hyp_evidence":
             evidence_ids = self._parse_indices(value, self.prompt_state.options)
+            if len(evidence_ids) < 1 or len(evidence_ids) > 3:
+                self._write("Select 1 to 3 evidence items.")
+                return
+            self.prompt_state.data["evidence_ids"] = evidence_ids
+            self.prompt_state.data["reasoning_index"] = 0
+            self.prompt_state.data["reasoning_steps"] = []
+            self._set_hypothesis_reasoning_prompt()
+            return
+        if step == "hyp_reasoning":
+            selection = self._parse_choice(value, len(self.prompt_state.options))
+            if selection is None:
+                self._write("Invalid choice.")
+                return
+            evidence_item = self.prompt_state.options[selection]
+            reasoning_index = int(self.prompt_state.data.get("reasoning_index", 0))
+            claims = list(self.prompt_state.data.get("claims", []))
+            claim = claims[reasoning_index]
+            steps = list(self.prompt_state.data.get("reasoning_steps", []))
+            steps.append(
+                ReasoningStep(
+                    claim=claim,
+                    evidence_id=evidence_item.id,
+                    note=describe_reasoning_step(self.presentation, evidence_item.id, claim),
+                )
+            )
+            self.prompt_state.data["reasoning_steps"] = steps
+            reasoning_index += 1
+            if reasoning_index < len(claims):
+                self.prompt_state.data["reasoning_index"] = reasoning_index
+                self._set_hypothesis_reasoning_prompt()
+                return
             data = self.prompt_state.data
             self.prompt_state = None
             self._set_prompt_active(False)
@@ -2351,7 +2492,8 @@ class Phase05App(App):
                 self.board,
                 data["suspect_id"],
                 data["claims"],
-                evidence_ids,
+                data["evidence_ids"],
+                data["reasoning_steps"],
             )
             self._apply_action_result(result)
             return

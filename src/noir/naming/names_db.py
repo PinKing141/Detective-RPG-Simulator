@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import re
 import sqlite3
+import warnings
 
 from noir.util.rng import Rng
 
@@ -17,6 +18,7 @@ RECENT_FIRST_WINDOW = 40
 RECENT_LAST_WINDOW = 80
 MAX_ATTEMPTS = 12
 PRIMARY_COUNTRY_WEIGHT = 0.7
+_SQLITE_HEADER = b"SQLite format 3\x00"
 
 
 def _name_key(name: str) -> str:
@@ -335,9 +337,45 @@ def default_db_path() -> Path:
     return Path(__file__).resolve().parents[3] / "data" / "names" / "names.db"
 
 
+def _is_valid_name_db(path: Path) -> bool:
+    if not path.exists() or not path.is_file():
+        return False
+    try:
+        header = path.read_bytes()[: len(_SQLITE_HEADER)]
+    except OSError:
+        return False
+    if header != _SQLITE_HEADER:
+        return False
+    try:
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {str(row["name"]) for row in cur.fetchall()}
+    except sqlite3.Error:
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return {"forenames", "surnames"}.issubset(tables)
+
+
 def load_name_generator(path: Path | None = None) -> NameGenerator:
     db_path = path or default_db_path()
-    db = NameDatabase(db_path) if db_path.exists() else None
+    db = None
+    if _is_valid_name_db(db_path):
+        try:
+            db = NameDatabase(db_path)
+        except sqlite3.Error:
+            db = None
+    elif db_path.exists():
+        warnings.warn(
+            f"Names DB at {db_path} is missing, invalid, or not a SQLite names database. Falling back to built-in names.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     return NameGenerator(
         db=db,
         fallback_first=list(DEFAULT_FIRST_NAMES),

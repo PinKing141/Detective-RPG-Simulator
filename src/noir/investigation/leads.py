@@ -127,7 +127,7 @@ def format_neighbor_lead(lead: NeighborLead) -> str:
 def update_lead_statuses(state: InvestigationState) -> list[str]:
     notes: list[str] = []
     for lead in state.leads:
-        if lead.status == LeadStatus.ACTIVE and state.time >= lead.deadline:
+        if lead.status == LeadStatus.ACTIVE and state.time > lead.deadline:
             lead.status = LeadStatus.EXPIRED
             notes.append(f"Lead went cold: {lead.label}.")
     return notes
@@ -151,7 +151,7 @@ def shorten_lead(state: InvestigationState, evidence_type: EvidenceType, delta: 
     if lead is None or lead.status != LeadStatus.ACTIVE:
         return None
     lead.deadline = max(state.time, lead.deadline - delta)
-    if state.time >= lead.deadline:
+    if state.time > lead.deadline:
         lead.status = LeadStatus.EXPIRED
     return lead
 
@@ -163,9 +163,11 @@ def apply_lead_decay(lead: Lead, items: list) -> list[str]:
         for item in items:
             if not isinstance(item, WitnessStatement):
                 continue
-            item.confidence = ConfidenceBand.WEAK
-            item.observed_person_ids = []
-            item.statement = "I remember someone near the scene, but the details are gone now."
+            item.confidence = _downgrade_confidence(item.confidence)
+            if item.observed_person_ids:
+                item.statement = "I still stand by the sighting, but the timing and detail feel less certain now."
+            else:
+                item.statement = "I remember someone near the scene, but the details are fading now."
         return ["Witness lead expired; the statement is less certain."]
     if lead.evidence_type == EvidenceType.CCTV:
         for item in items:
@@ -189,3 +191,9 @@ def apply_lead_decay(lead: Lead, items: list) -> list[str]:
                 item.observation = "The observation is too degraded to support a clear conclusion."
         return ["Forensics lead expired; the lab report is inconclusive."]
     return []
+
+
+def _downgrade_confidence(confidence: ConfidenceBand) -> ConfidenceBand:
+    if confidence == ConfidenceBand.STRONG:
+        return ConfidenceBand.MEDIUM
+    return ConfidenceBand.WEAK

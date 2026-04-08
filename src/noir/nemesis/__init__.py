@@ -1,5 +1,6 @@
 """Nemesis helpers (Phase 3D/3E)."""
 
+from noir.nemesis.director_hooks import apply_nemesis_runtime_interference
 from noir.nemesis.patterns import PatternAddendum, PatternTracker
 from noir.nemesis.signature import apply_signature_to_truth, build_signature_meta
 from noir.nemesis.state import (
@@ -17,6 +18,7 @@ from noir.nemesis.state import (
 __all__ = [
     "PatternAddendum",
     "PatternTracker",
+    "apply_nemesis_runtime_interference",
     "apply_signature_to_truth",
     "build_signature_meta",
     "NemesisCasePlan",
