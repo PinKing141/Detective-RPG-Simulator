@@ -90,6 +90,21 @@ from noir.profiling.profile import (
     format_profile_lines,
 )
 from noir.profiling.summary import build_profiling_summary, format_profiling_summary
+from noir.ui.app_support import (
+    format_claim as app_format_claim,
+    format_confidence as app_format_confidence,
+    format_time_phrase as app_format_time_phrase,
+    interview_approach_label as app_interview_approach_label,
+    interview_theme_label as app_interview_theme_label,
+    parse_case_archetype as app_parse_case_archetype,
+    parse_choice as app_parse_choice,
+    parse_indices as app_parse_indices,
+    parse_multi_choice as app_parse_multi_choice,
+    profile_drive_label as app_profile_drive_label,
+    profile_mobility_label as app_profile_mobility_label,
+    profile_org_label as app_profile_org_label,
+    warrant_label as app_warrant_label,
+)
 from noir.util.rng import Rng
 from noir.util.grammar import dedupe_lines, normalize_line
 from noir.persistence.db import WorldStore
@@ -926,66 +941,25 @@ class Phase05App(App):
         return None
 
     def _format_claim(self, claim: ClaimType) -> str:
-        mapping = {
-            ClaimType.PRESENCE: "Present near the scene",
-            ClaimType.OPPORTUNITY: "Opportunity during the time window",
-            ClaimType.MOTIVE: "Motive linked to the victim",
-            ClaimType.BEHAVIOR: "Behavior aligns with the crime",
-        }
-        return mapping.get(claim, claim.value)
+        return app_format_claim(claim)
 
     def _interview_approach_label(self, approach: InterviewApproach) -> str:
-        mapping = {
-            InterviewApproach.BASELINE: "Baseline (rapport)",
-            InterviewApproach.PRESSURE: "Pressure (challenge)",
-            InterviewApproach.THEME: "Motive framing",
-        }
-        return mapping.get(approach, approach.value)
+        return app_interview_approach_label(approach)
 
     def _interview_theme_label(self, theme: InterviewTheme) -> str:
-        mapping = {
-            InterviewTheme.BLAME_VICTIM: "Blame the victim",
-            InterviewTheme.CIRCUMSTANCE: "Blame the circumstances",
-            InterviewTheme.ALTRUISTIC: "Altruistic motive",
-            InterviewTheme.ACCIDENTAL: "Accidental outcome",
-        }
-        return mapping.get(theme, theme.value)
+        return app_interview_theme_label(theme)
 
     def _profile_org_label(self, organization: ProfileOrganization) -> str:
-        mapping = {
-            ProfileOrganization.ORGANIZED: "Organized",
-            ProfileOrganization.DISORGANIZED: "Disorganized",
-            ProfileOrganization.MIXED: "Mixed",
-            ProfileOrganization.UNKNOWN: "Unknown",
-        }
-        return mapping.get(organization, organization.value)
+        return app_profile_org_label(organization)
 
     def _profile_drive_label(self, drive: ProfileDrive) -> str:
-        mapping = {
-            ProfileDrive.VISIONARY: "Visionary",
-            ProfileDrive.MISSION: "Mission-oriented",
-            ProfileDrive.HEDONISTIC: "Hedonistic",
-            ProfileDrive.POWER_CONTROL: "Power/Control",
-            ProfileDrive.UNKNOWN: "Unknown",
-        }
-        return mapping.get(drive, drive.value)
+        return app_profile_drive_label(drive)
 
     def _profile_mobility_label(self, mobility: ProfileMobility) -> str:
-        mapping = {
-            ProfileMobility.MARAUDER: "Marauder (local)",
-            ProfileMobility.COMMUTER: "Commuter",
-            ProfileMobility.UNKNOWN: "Unknown",
-        }
-        return mapping.get(mobility, mobility.value)
+        return app_profile_mobility_label(mobility)
 
     def _warrant_label(self, warrant_type: WarrantType) -> str:
-        mapping = {
-            WarrantType.SEARCH: "Search warrant (property)",
-            WarrantType.ARREST: "Arrest warrant (person)",
-            WarrantType.DIGITAL: "Digital records warrant",
-            WarrantType.SURVEILLANCE: "Surveillance authorization",
-        }
-        return mapping.get(warrant_type, warrant_type.value)
+        return app_warrant_label(warrant_type)
 
     def _format_hour(self, hour: int) -> str:
         value = hour % 24
@@ -996,15 +970,10 @@ class Phase05App(App):
         return f"{display}{suffix}"
 
     def _format_time_phrase(self, window: tuple[int, int]) -> str:
-        start, end = window
-        if start == end:
-            return f"around {self._format_hour(start)}"
-        return f"between {self._format_hour(start)} and {self._format_hour(end)}"
+        return app_format_time_phrase(window)
 
     def _format_confidence(self, confidence) -> str:
-        value = confidence.value if hasattr(confidence, "value") else str(confidence)
-        mapping = {"strong": "High", "medium": "Medium", "weak": "Low"}
-        return mapping.get(value, value.capitalize())
+        return app_format_confidence(confidence)
 
     def _nemesis_briefing_lines(self) -> list[str]:
         state = self.world.nemesis_state
@@ -2499,45 +2468,15 @@ class Phase05App(App):
             return
 
     def _parse_choice(self, value: str, count: int) -> int | None:
-        if not value.isdigit():
-            return None
-        index = int(value) - 1
-        if index < 0 or index >= count:
-            return None
-        return index
+        return app_parse_choice(value, count)
 
     def _parse_indices(self, value: str, items: list) -> list:
-        indices: list[int] = []
-        for part in value.split(","):
-            part = part.strip()
-            if not part.isdigit():
-                continue
-            indices.append(int(part) - 1)
-        selected: list = []
-        for idx in indices:
-            if 0 <= idx < len(items):
-                selected.append(items[idx].id)
-        return selected
+        return app_parse_indices(value, items)
 
     def _parse_multi_choice(self, value: str, count: int) -> list[int]:
-        indices: list[int] = []
-        for part in value.split(","):
-            part = part.strip()
-            if not part.isdigit():
-                continue
-            index = int(part) - 1
-            if 0 <= index < count:
-                indices.append(index)
-        return list(dict.fromkeys(indices))
+        return app_parse_multi_choice(value, count)
 
     def _parse_case_archetype(
         self, value: str | CaseArchetype | None
     ) -> CaseArchetype | None:
-        if isinstance(value, CaseArchetype):
-            return value
-        if not value:
-            return None
-        for archetype in CaseArchetype:
-            if archetype.value == value:
-                return archetype
-        return None
+        return app_parse_case_archetype(value)
