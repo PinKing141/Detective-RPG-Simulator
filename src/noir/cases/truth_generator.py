@@ -422,8 +422,29 @@ def generate_case(
     if witnesses:
         contradiction_witness = rng.fork("contradiction").choice(witnesses)
 
+    # Red herring suspect — genuinely at the scene, plausible connection to victim, not the offender.
+    # Uses an isolated RNG fork so it does not disturb the existing name/event sequence.
+    rh_rng = rng.fork("red-herring")
+    rh_name_pick = _name_pick(name_rng, name_context)
+    rh_traits: dict[str, float | str] = {}
+    if rh_name_pick.country:
+        rh_traits["country_of_origin"] = rh_name_pick.country
+    red_herring = Person(
+        name=rh_name_pick.full,
+        role_tags=[RoleTag.SUSPECT],
+        traits=rh_traits,
+    )
+    truth.add_person(red_herring)
+    rh_victim_closeness = _pick_closeness(rh_rng, weights=(0.25, 0.55, 0.2))
+    rh_victim_relation = _pick_relationship_type(rh_rng, rh_victim_closeness)
+    truth.add_relationship(red_herring.id, victim.id, rh_victim_relation, rh_victim_closeness)
+    # Place the red herring at the scene overlapping the crime window — looks incriminating
+    rh_entry = crime_time - 1
+    rh_exit = crime_time + 1
+
     truth.set_location(victim.id, crime_scene.id, entry_time=crime_time - 1, exit_time=crime_time + 1)
     truth.set_location(offender.id, crime_scene.id, entry_time=crime_time - 1, exit_time=crime_time + 1)
+    truth.set_location(red_herring.id, crime_scene.id, entry_time=rh_entry, exit_time=rh_exit)
     for scene_witness in witnesses:
         truth.set_location(
             scene_witness.id, crime_scene.id, entry_time=crime_time - 2, exit_time=crime_time
@@ -508,6 +529,7 @@ def generate_case(
             "nemesis_visibility": nemesis_visibility,
             "nemesis_degraded": nemesis_degraded,
             "nemesis_tone": nemesis_tone or "",
+            "red_herring_id": str(red_herring.id),
         }
     )
 
@@ -521,6 +543,7 @@ def generate_case(
         "witness_id": witness.id,
         "witness_ids": [scene_witness.id for scene_witness in witnesses],
         "weapon_id": weapon.id,
+        "red_herring_id": red_herring.id,
         "case_archetype": case_archetype.value,
         "scene_layout": truth.case_meta.get("scene_layout"),
         "locations": [

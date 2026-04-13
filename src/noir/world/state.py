@@ -357,7 +357,7 @@ class WorldState:
         archetype = self._tension_wave_archetype()
         reason = "tension_wave"
         last_record = self.case_history[-1] if self.case_history else None
-        if last_record and last_record.outcome == ArrestResult.FAILED.value:
+        if last_record and last_record.outcome in {ArrestResult.FAILED.value, ArrestResult.WRONG.value}:
             archetype = CaseArchetype.CHARACTER
             reason = "cooldown_after_failure"
         elif self.pressure >= 4:
@@ -434,6 +434,8 @@ class WorldState:
         index = order.index(current)
         if outcome == ArrestResult.SUCCESS:
             index -= 1
+        elif outcome == ArrestResult.WRONG:
+            index += 2
         elif outcome == ArrestResult.FAILED:
             index += 1
         index = max(0, min(index, len(order) - 1))

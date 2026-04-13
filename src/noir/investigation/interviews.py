@@ -48,6 +48,8 @@ class InterviewState:
     motive_to_lie: bool = False
     contradiction_emitted: bool = False
     dialog_node_id: str | None = None
+    approaches_used: list[str] = field(default_factory=list)
+    times_interviewed: int = 0
 
 
 @dataclass(frozen=True)

@@ -378,6 +378,8 @@ def _resolve_dialog_role(
         return "default"
     if RoleTag.OFFENDER in person.role_tags:
         return "suspect"
+    if RoleTag.SUSPECT in person.role_tags and RoleTag.OFFENDER not in person.role_tags:
+        return "red_herring"
     if interview_state.motive_to_lie:
         return "hostile_witness"
     if person.traits.get("witness_role") == "neighbor":
@@ -557,6 +559,25 @@ def interview(
     notes = update_lead_statuses(state)
     interview_state = _interview_state(state, person_id, truth)
     role_key = _resolve_dialog_role(person_id, truth, interview_state)
+
+    # Track repeat approaches and apply penalties
+    approach_str = approach.value
+    is_repeat_approach = approach_str in interview_state.approaches_used
+    interview_state.times_interviewed += 1
+    if approach_str not in interview_state.approaches_used:
+        interview_state.approaches_used.append(approach_str)
+
+    if is_repeat_approach:
+        interview_state.fatigue = min(1.0, interview_state.fatigue + 0.15)
+        if approach == InterviewApproach.PRESSURE:
+            interview_state.resistance = min(1.0, interview_state.resistance + 0.2)
+            notes.append("Repeated pressure. The witness shuts down further.")
+        elif approach == InterviewApproach.BASELINE:
+            interview_state.rapport = max(0.0, interview_state.rapport - 0.1)
+            notes.append("Same questions again. The witness is growing impatient.")
+        else:
+            notes.append("The witness has heard this line before. No new ground.")
+
     if dialog_choice_index is not None:
         graph = load_interview_graph_for_role(role_key)
         if graph is not None:

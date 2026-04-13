@@ -117,7 +117,7 @@ def build_post_arrest_statement(
     suspect_name, victim_name = _pick_name(truth, board)
     motive = truth.case_meta.get("motive_category")
     motive_key = motive if isinstance(motive, str) else ""
-    if not validation.is_correct_suspect or outcome == ArrestResult.FAILED:
+    if not validation.is_correct_suspect or outcome in {ArrestResult.FAILED, ArrestResult.WRONG}:
         pool = _DENIALS + _DEFLECTIONS
         line = rng.choice(pool)
         return normalize_lines([line.format(suspect=suspect_name, victim=victim_name)])

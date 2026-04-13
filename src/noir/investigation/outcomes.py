@@ -14,6 +14,7 @@ class ArrestResult(StrEnum):
     SUCCESS = "success"
     PARTIAL = "partial"
     FAILED = "failed"
+    WRONG = "wrong"
 
 
 @dataclass(frozen=True)
@@ -42,11 +43,23 @@ def resolve_case_outcome(validation: ValidationResult) -> CaseOutcome:
             pressure_delta=1,
             notes=["The case is right, but the support is thin."],
         )
+    if not validation.is_correct_suspect:
+        return CaseOutcome(
+            arrest_result=ArrestResult.WRONG,
+            trust_delta=-2,
+            pressure_delta=5,
+            notes=[
+                "Wrong person charged. The real offender is still out there.",
+                "Command is calling for an internal review.",
+                "An innocent person just lost their freedom.",
+            ],
+        )
+    # Correct suspect but no probable cause — case collapses at charge
     return CaseOutcome(
         arrest_result=ArrestResult.FAILED,
         trust_delta=-1,
-        pressure_delta=2,
-        notes=["Command sees this as a weak or misdirected arrest."],
+        pressure_delta=3,
+        notes=["Right target, but the case won't hold. The charge collapses."],
     )
 
 

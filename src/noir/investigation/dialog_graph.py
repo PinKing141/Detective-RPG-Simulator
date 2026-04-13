@@ -86,6 +86,7 @@ _ROLE_FILE_MAP: dict[str, str] = {
     "suspect": "interview_suspect.json",
     "hostile_witness": "interview_hostile_witness.json",
     "neighbor": "interview_neighbor.json",
+    "red_herring": "interview_red_herring.json",
     "default": "interview_default.json",
 }
 

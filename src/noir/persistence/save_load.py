@@ -293,6 +293,8 @@ def _serialize_interview_state(s: InterviewState) -> dict:
         "motive_to_lie": s.motive_to_lie,
         "contradiction_emitted": s.contradiction_emitted,
         "dialog_node_id": s.dialog_node_id,
+        "approaches_used": list(s.approaches_used),
+        "times_interviewed": s.times_interviewed,
     }
 
 
@@ -307,6 +309,8 @@ def _deserialize_interview_state(d: dict) -> InterviewState:
     s.motive_to_lie = bool(d.get("motive_to_lie", False))
     s.contradiction_emitted = bool(d.get("contradiction_emitted", False))
     s.dialog_node_id = d.get("dialog_node_id")
+    s.approaches_used = list(d.get("approaches_used", []))
+    s.times_interviewed = int(d.get("times_interviewed", 0))
     return s
 
 

@@ -1,0 +1,253 @@
+{
+  "graph": {
+    "root": "START",
+    "nodes": [
+      {
+        "id": "START",
+        "text": "",
+        "choices": [
+          {
+            "text": "Ask where they were",
+            "leads_to": "RH_LOCATION",
+            "tags": ["presence", "baseline"]
+          },
+          {
+            "text": "Ask what they saw",
+            "leads_to": "RH_SAW",
+            "tags": ["presence", "witness"]
+          },
+          {
+            "text": "Probe the timeline",
+            "leads_to": "RH_TIMELINE",
+            "tags": ["timeline", "opportunity"]
+          },
+          {
+            "text": "Challenge their alibi",
+            "leads_to": "RH_ALIBI",
+            "tags": ["alibi", "opportunity", "pressure"]
+          },
+          {
+            "text": "Ask about their connection to the victim",
+            "leads_to": "RH_VICTIM_REL",
+            "tags": ["relationship"]
+          },
+          {
+            "text": "Ask about their recent behavior",
+            "leads_to": "RH_BEHAVIOR",
+            "tags": ["behavior", "relationship"]
+          },
+          {
+            "text": "Press hard on the inconsistencies",
+            "leads_to": "RH_PRESSURE",
+            "tags": ["pressure", "contradiction"]
+          },
+          {
+            "text": "Suggest you understand why it happened",
+            "leads_to": "RH_THEME",
+            "tags": ["blame_victim", "circumstance", "altruistic", "accidental", "theme"]
+          }
+        ]
+      },
+
+      {
+        "id": "RH_LOCATION",
+        "text": "I was there. I am not going to lie about that. I had every reason to be there and none of them are what you are thinking.",
+        "choices": [
+          {
+            "text": "What reason?",
+            "leads_to": "RH_LOC_REASON",
+            "tags": []
+          },
+          {
+            "text": "How long were you there?",
+            "leads_to": "RH_LOC_DURATION",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "RH_LOC_REASON",
+        "text": "I knew {victim}. Not well, but enough. We had talked about something earlier that week and I went to finish the conversation. When I got there the situation was already wrong. I did not stay."
+      },
+      {
+        "id": "RH_LOC_DURATION",
+        "text": "Not long. I saw enough to know something was wrong and I left. I should have called someone immediately. I know that. I was scared and I made a bad decision."
+      },
+
+      {
+        "id": "RH_SAW",
+        "text": "I saw the aftermath. Not the act. There is a difference and I need you to understand that difference.",
+        "choices": [
+          {
+            "text": "What exactly did you see?",
+            "leads_to": "RH_SAW_DETAIL",
+            "tags": []
+          },
+          {
+            "text": "Why didn't you report it?",
+            "leads_to": "RH_SAW_REPORT",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "RH_SAW_DETAIL",
+        "text": "The door was open. The light was wrong. I knew before I stepped inside that something had happened. I did not go further in. I am telling you exactly what I saw."
+      },
+      {
+        "id": "RH_SAW_REPORT",
+        "text": "I panicked. I know that is not a good reason. I was at the scene and I knew how it would look, so I left and I told myself someone else would call. That is the worst thing I have done and I have to live with it."
+      },
+
+      {
+        "id": "RH_TIMELINE",
+        "text": "I can tell you exactly when I was there. I am not trying to be vague. I arrived late and I left quickly. Check the transit records if you have them. I used my card.",
+        "choices": [
+          {
+            "text": "What time exactly?",
+            "leads_to": "RH_TIME_EXACT",
+            "tags": []
+          },
+          {
+            "text": "Did you see anyone else?",
+            "leads_to": "RH_TIME_OTHERS",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "RH_TIME_EXACT",
+        "text": "I got there around ten. Maybe ten past. I was not watching the clock but I know it was late because the street was quiet."
+      },
+      {
+        "id": "RH_TIME_OTHERS",
+        "text": "There was someone leaving when I arrived. I do not know who. They moved quickly and I did not get a good look. I should have paid more attention. I did not."
+      },
+
+      {
+        "id": "RH_ALIBI",
+        "text": "I do not have a clean alibi because I was there. That is the whole problem and I understand that. But being at a place is not the same as doing what happened there.",
+        "choices": [
+          {
+            "text": "Can anyone place you there at a different time?",
+            "leads_to": "RH_ALIBI_CORROBORATE",
+            "tags": []
+          },
+          {
+            "text": "Your presence alone is damning.",
+            "leads_to": "RH_ALIBI_PUSHBACK",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "RH_ALIBI_CORROBORATE",
+        "text": "The person I saw leaving. If you find them, they saw me arrive. That puts me there after whatever happened. I am asking you to look for them because they are the only thing I have."
+      },
+      {
+        "id": "RH_ALIBI_PUSHBACK",
+        "text": "I know how it looks. I have thought about nothing else since this started. But you are building a case on proximity and I need you to actually look at what happened, not just at who was nearby."
+      },
+
+      {
+        "id": "RH_VICTIM_REL",
+        "text": "We knew each other. Not closely. There was no bad blood, no history, nothing you would call a motive. We were the kind of people who talked when we ran into each other and did not otherwise.",
+        "choices": [
+          {
+            "text": "When did you last speak?",
+            "leads_to": "RH_VR_LAST",
+            "tags": []
+          },
+          {
+            "text": "Was there any tension between you?",
+            "leads_to": "RH_VR_TENSION",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "RH_VR_LAST",
+        "text": "A few days before. We talked about something ordinary. I cannot even remember exactly what. That is how unremarkable it was."
+      },
+      {
+        "id": "RH_VR_TENSION",
+        "text": "No. I want to say that clearly. There was no tension. No argument. No reason for any of this. That is what makes it senseless and that is why it does not make sense to point at me."
+      },
+
+      {
+        "id": "RH_BEHAVIOR",
+        "text": "I have been scared. I have been avoiding people because I do not know how to explain where I was without sounding like I am confessing to something I did not do. That is probably what you are seeing.",
+        "choices": [
+          {
+            "text": "That looks like guilt.",
+            "leads_to": "RH_BEH_GUILT",
+            "tags": []
+          },
+          {
+            "text": "What were you afraid of specifically?",
+            "leads_to": "RH_BEH_FEAR",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "RH_BEH_GUILT",
+        "text": "It looks like a person who was in the wrong place and is terrified of being made into the wrong story. I understand those look the same from where you are sitting."
+      },
+      {
+        "id": "RH_BEH_FEAR",
+        "text": "That you would do exactly this. That you would find out I was there and stop looking further. That the real explanation would get buried because a convenient one was sitting right in front of you."
+      },
+
+      {
+        "id": "RH_PRESSURE",
+        "text": "I am not cracking because there is nothing to crack. You can sit here and push for the rest of the day and I will keep telling you the same thing, because it is the only thing I have. The truth.",
+        "choices": [
+          {
+            "text": "We have evidence placing you there.",
+            "leads_to": "RH_PRESS_EVIDENCE",
+            "tags": []
+          },
+          {
+            "text": "Someone is lying. We think it's you.",
+            "leads_to": "RH_PRESS_ACCUSATION",
+            "tags": []
+          }
+        ]
+      },
+      {
+        "id": "RH_PRESS_EVIDENCE",
+        "text": "Of course you do. I was there. I already told you I was there. If your evidence says I was at the scene, your evidence is right. Now ask me what it does not tell you: who else was there, and what happened before I arrived."
+      },
+      {
+        "id": "RH_PRESS_ACCUSATION",
+        "text": "Then you are wrong. And I am not going to make it easier for you to be wrong by pretending there is something to confess. Go find the person who left when I arrived. That is where your case actually is."
+      },
+
+      {
+        "id": "RH_THEME",
+        "text": "I do not know what you are asking me. If you are suggesting I had a reason to hurt {victim}, you are wrong. If you are suggesting I understand why someone else did, I do not. I have no framework for this.",
+        "choices": [
+          {
+            "text": "What if it wasn't meant to go this far?",
+            "leads_to": "RH_THEME_ACCIDENT",
+            "tags": ["accidental"]
+          },
+          {
+            "text": "What if someone felt they had no choice?",
+            "leads_to": "RH_THEME_CHOICE",
+            "tags": ["circumstance", "altruistic"]
+          }
+        ]
+      },
+      {
+        "id": "RH_THEME_ACCIDENT",
+        "text": "I understand you are trying to give me an out. I do not need one. Nothing happened by accident on my part because nothing happened. I walked in, I saw something was wrong, and I left. That is the whole story."
+      },
+      {
+        "id": "RH_THEME_CHOICE",
+        "text": "You are describing someone who made a calculation. I did not make any calculation. I had no reason to. I am not the person you are looking for and the longer you spend on me, the further away that person gets."
+      }
+    ]
+  }
+}
