@@ -34,7 +34,8 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
-from noir.investigation.dialog_graph import load_default_interview_graph
+from noir.investigation.dialog_graph import load_interview_graph_for_role
+from noir.investigation.actions import resolve_dialog_role
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
 from noir.investigation.leads import (
     LeadStatus,
@@ -1801,10 +1802,14 @@ class Phase05App(App):
         approach: InterviewApproach,
         theme: InterviewTheme | None,
     ) -> bool:
-        graph = load_default_interview_graph()
+        interview_state = self.state.interviews.get(str(witness_id)) if self.state else None
+        # Resolve role so player sees the correct graph for this person
+        from noir.investigation.interviews import InterviewState
+        effective_state = interview_state or InterviewState()
+        role_key = resolve_dialog_role(witness_id, self.truth, effective_state)
+        graph = load_interview_graph_for_role(role_key)
         if graph is None:
             return False
-        interview_state = self.state.interviews.get(str(witness_id)) if self.state else None
         node_id = graph.root_node_id
         if interview_state and interview_state.dialog_node_id:
             node_id = interview_state.dialog_node_id
@@ -1815,14 +1820,27 @@ class Phase05App(App):
             node = graph.node(graph.root_node_id)
         if not node.choices:
             return False
+        at_root = node.node_id == graph.root_node_id
+        exhausted = interview_state.exhausted_topics if interview_state else set()
+        # Build available choices, marking covered topics
+        available: list = []
+        lines = ["Choose a prompt:"]
+        idx = 1
+        for choice in node.choices:
+            if at_root and choice.leads_to_id in exhausted:
+                lines.append(f"   [covered] {choice.text}")
+            else:
+                available.append(choice)
+                lines.append(f"{idx}) {choice.text}")
+                idx += 1
+        if not available:
+            self._write("All topics covered with this witness.")
+            return False
         self.prompt_state = PromptState(
             step="interview_dialog",
             data={"witness_id": witness_id, "approach": approach, "theme": theme},
-            options=list(node.choices),
+            options=available,
         )
-        lines = ["Choose a prompt:"]
-        for idx, choice in enumerate(self.prompt_state.options, start=1):
-            lines.append(f"{idx}) {choice.text}")
         self._set_prompt("Interview prompt", lines)
         self._set_prompt_active(True)
         return True

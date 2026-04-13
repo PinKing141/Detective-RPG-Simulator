@@ -368,7 +368,7 @@ def _theme_match(theme: InterviewTheme | None, motive_category: str) -> bool:
     return False
 
 
-def _resolve_dialog_role(
+def resolve_dialog_role(
     person_id: UUID,
     truth: TruthState,
     interview_state: InterviewState,
@@ -402,32 +402,70 @@ def _dialog_statement_from_graph(
     if not graph.has_node(node_id):
         node_id = graph.root_node_id
     node = graph.node(node_id)
+    at_root = node_id == graph.root_node_id
+
     tags = [approach.value]
     if theme is not None:
         tags.append(f"theme:{theme.value}")
         tags.append(theme.value)
-    if (
-        dialog_choice_index is not None
-        and node.choices
-        and 0 <= dialog_choice_index < len(node.choices)
-    ):
-        next_id = node.choices[dialog_choice_index].leads_to_id
+
+    # Filter exhausted topics when at root
+    available_choices = list(node.choices)
+    if at_root:
+        available_choices = [
+            c for c in node.choices
+            if c.leads_to_id not in interview_state.exhausted_topics
+        ]
+        if not available_choices:
+            # All topics covered — nothing new to learn
+            interview_state.dialog_node_id = graph.root_node_id
+            return None
+
+    if dialog_choice_index is not None and available_choices and 0 <= dialog_choice_index < len(available_choices):
+        next_id = available_choices[dialog_choice_index].leads_to_id
     else:
-        choice_index = select_choice_index(node, tags)
-        if choice_index is None or not node.choices:
-            choice_index = None
+        # Auto-select by tag match from available choices
+        tag_set = set(tags)
+        choice_index = next(
+            (i for i, c in enumerate(available_choices) if tag_set.intersection(c.tags)),
+            0 if available_choices else None,
+        )
         if choice_index is None:
             interview_state.dialog_node_id = node.node_id
             return render_dialog_text(node.text, context) or None
-        next_id = node.choices[choice_index].leads_to_id
-    if graph.has_node(next_id):
-        interview_state.dialog_node_id = next_id
-        node = graph.node(next_id)
-    else:
+        next_id = available_choices[choice_index].leads_to_id
+
+    if not graph.has_node(next_id):
         interview_state.dialog_node_id = node.node_id
         return render_dialog_text(node.text, context) or None
+
+    # Track which branch we entered from root
+    if at_root:
+        interview_state.current_branch_id = next_id
+
+    interview_state.visited_node_ids.add(next_id)
+    interview_state.dialog_node_id = next_id
+    node = graph.node(next_id)
+
     if not node.choices:
-        interview_state.dialog_node_id = graph.root_node_id
+        # Leaf reached — go back to branch root if there are unvisited sub-choices there,
+        # otherwise mark the branch exhausted and return to root.
+        branch_id = interview_state.current_branch_id
+        if branch_id and graph.has_node(branch_id) and branch_id != graph.root_node_id:
+            branch_node = graph.node(branch_id)
+            unvisited = [
+                c for c in branch_node.choices
+                if c.leads_to_id not in interview_state.visited_node_ids
+            ]
+            if unvisited:
+                interview_state.dialog_node_id = branch_id
+            else:
+                interview_state.exhausted_topics.add(branch_id)
+                interview_state.current_branch_id = None
+                interview_state.dialog_node_id = graph.root_node_id
+        else:
+            interview_state.dialog_node_id = graph.root_node_id
+
     rendered = render_dialog_text(node.text, context)
     return rendered or None
 
@@ -558,7 +596,7 @@ def interview(
     apply_action(truth, EventKind.INTERVIEW, state.time, location_id, participants=[person_id])
     notes = update_lead_statuses(state)
     interview_state = _interview_state(state, person_id, truth)
-    role_key = _resolve_dialog_role(person_id, truth, interview_state)
+    role_key = resolve_dialog_role(person_id, truth, interview_state)
 
     # Track repeat approaches and apply penalties
     approach_str = approach.value
@@ -969,6 +1007,27 @@ def interview(
     summary = f"Interview ({approach.value}) yields a usable statement."
     if not revealed:
         summary = f"Interview ({approach.value}) adds nothing new."
+
+    # Witness mood line — gives player signal on interview state
+    if interview_state.rapport > 0.65:
+        mood = "cooperative"
+    elif interview_state.rapport > 0.35:
+        mood = "guarded"
+    else:
+        mood = "hostile"
+    mood_parts = [f"Witness mood: {mood}"]
+    if interview_state.fatigue > 0.7:
+        mood_parts.append("visibly fatigued")
+    if interview_state.resistance > 0.75:
+        mood_parts.append("resisting further pressure")
+    topics_left = len([
+        t for t in (interview_state.exhausted_topics or set())
+    ])
+    if interview_state.times_interviewed > 1:
+        remaining = interview_state.times_interviewed
+        mood_parts.append(f"interviewed {remaining}x")
+    notes.append(", ".join(mood_parts) + ".")
+
     return ActionResult(
         action=ActionType.INTERVIEW,
         outcome=ActionOutcome.SUCCESS,

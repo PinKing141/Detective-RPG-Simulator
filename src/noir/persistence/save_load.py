@@ -295,6 +295,9 @@ def _serialize_interview_state(s: InterviewState) -> dict:
         "dialog_node_id": s.dialog_node_id,
         "approaches_used": list(s.approaches_used),
         "times_interviewed": s.times_interviewed,
+        "current_branch_id": s.current_branch_id,
+        "visited_node_ids": sorted(s.visited_node_ids),
+        "exhausted_topics": sorted(s.exhausted_topics),
     }
 
 
@@ -311,6 +314,9 @@ def _deserialize_interview_state(d: dict) -> InterviewState:
     s.dialog_node_id = d.get("dialog_node_id")
     s.approaches_used = list(d.get("approaches_used", []))
     s.times_interviewed = int(d.get("times_interviewed", 0))
+    s.current_branch_id = d.get("current_branch_id")
+    s.visited_node_ids = set(d.get("visited_node_ids", []))
+    s.exhausted_topics = set(d.get("exhausted_topics", []))
     return s
 
 

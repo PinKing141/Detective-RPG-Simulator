@@ -50,6 +50,10 @@ class InterviewState:
     dialog_node_id: str | None = None
     approaches_used: list[str] = field(default_factory=list)
     times_interviewed: int = 0
+    # Conversation direction tracking
+    current_branch_id: str | None = None    # first-level node we branched into from root
+    visited_node_ids: set[str] = field(default_factory=set)   # all nodes ever visited
+    exhausted_topics: set[str] = field(default_factory=set)   # branch node ids fully explored
 
 
 @dataclass(frozen=True)
