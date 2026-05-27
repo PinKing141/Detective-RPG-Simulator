@@ -59,3 +59,28 @@ def test_case_start_modifiers_reflect_recent_failed_case() -> None:
     assert modifiers.cooperation < 0.6
     assert modifiers.lead_deadline_delta >= 2
     assert any("Wrong-arrest fallout carries over" in line for line in modifiers.briefing_lines)
+
+
+def test_world_memory_tracks_location_friction_and_thread_escalation() -> None:
+    world = WorldState()
+    world.register_unresolved_thread("dock-smuggling", timer=0)
+    world.apply_case_outcome(
+        CaseOutcome(
+            arrest_result=ArrestResult.FAILED,
+            trust_delta=-2,
+            pressure_delta=2,
+            notes=["Raid failed and target fled."],
+        ),
+        case_id="case_101",
+        seed=17,
+        district="harbor",
+        location_name="Dock Office",
+        started_tick=0,
+        ended_tick=4,
+    )
+
+    modifiers = world.case_start_modifiers("harbor", "Dock Office")
+
+    assert world.location_reputation["Dock Office"].friction >= 1
+    assert world.unresolved_threads["dock-smuggling"].severity >= 2
+    assert any("Unresolved thread 'dock-smuggling'" in line for line in modifiers.briefing_lines)
