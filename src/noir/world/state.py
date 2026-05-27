@@ -75,6 +75,40 @@ class DetectiveIdentityState:
 
 
 @dataclass
+class NPCMemoryRecord:
+    person_id: str
+    last_tone: str = "neutral"
+    impact: str = "neutral"
+    promise_integrity: str = "unknown"
+    exposure_events: list[str] = field(default_factory=list)
+    last_case_id: str = ""
+
+
+@dataclass
+class LocationReputationRecord:
+    location_name: str
+    trust_trend: int = 0
+    friction: int = 0
+    safety_noise: int = 0
+    heat: int = 0
+
+
+@dataclass
+class MistakeRecord:
+    key: str
+    count: int = 0
+    last_case_id: str = ""
+
+
+@dataclass
+class EscalationThread:
+    key: str
+    severity: int = 1
+    timer: int = 0
+    mutation: str = "dormant"
+
+
+@dataclass
 class CampaignState:
     season_index: int = 1
     episode_index: int = 1
@@ -166,6 +200,10 @@ class WorldState:
     location_status: dict[str, DistrictStatus] = field(default_factory=dict)
     case_history: list[CaseRecord] = field(default_factory=list)
     people_index: dict[str, PersonRecord] = field(default_factory=dict)
+    npc_memory: dict[str, NPCMemoryRecord] = field(default_factory=dict)
+    location_reputation: dict[str, LocationReputationRecord] = field(default_factory=dict)
+    mistake_history: dict[str, MistakeRecord] = field(default_factory=dict)
+    unresolved_threads: dict[str, EscalationThread] = field(default_factory=dict)
     episode_titles: EpisodeTitleState = field(default_factory=EpisodeTitleState)
     campaign: CampaignState = field(default_factory=CampaignState)
 
@@ -217,6 +255,12 @@ class WorldState:
                 notes=record_notes,
             )
         )
+        self._apply_consequence_memory(
+            outcome=outcome,
+            case_id=case_id,
+            location_name=location_name,
+        )
+        self._advance_unresolved_threads(case_id)
         return notes
 
     def case_start_modifiers(
@@ -258,6 +302,19 @@ class WorldState:
             briefing_lines.append(
                 "The pattern board is still live; this case starts under the weight of what you already know."
             )
+        location_rep = self.location_reputation_for(location_name)
+        if location_rep.friction >= 2:
+            cooperation = clamp(cooperation - 0.1, 0.2, 1.0)
+            lead_deadline_delta = max(lead_deadline_delta, 1)
+            briefing_lines.append(
+                f"{location_name} is still wary after earlier operations; access requests will take longer."
+            )
+        for thread in self.unresolved_threads.values():
+            if thread.severity >= 2:
+                lead_deadline_delta = max(lead_deadline_delta, 1)
+                briefing_lines.append(
+                    f"Unresolved thread '{thread.key}' has escalated ({thread.mutation}); fallout is bleeding into this case."
+                )
         return CaseStartModifiers(
             cooperation=cooperation,
             lead_deadline_delta=lead_deadline_delta,
@@ -471,3 +528,78 @@ class WorldState:
         if status == DistrictStatus.TENSE:
             return "Location status: tense. Expect tightened access."
         return "Location status: calm."
+
+    def location_reputation_for(self, location_name: str) -> LocationReputationRecord:
+        record = self.location_reputation.get(location_name)
+        if record is None:
+            record = LocationReputationRecord(location_name=location_name)
+            self.location_reputation[location_name] = record
+        return record
+
+    def remember_npc_interaction(
+        self,
+        person_id: str,
+        case_id: str,
+        tone: str,
+        impact: str = "neutral",
+        promise_integrity: str = "unknown",
+        exposure_event: str | None = None,
+    ) -> None:
+        record = self.npc_memory.get(person_id)
+        if record is None:
+            record = NPCMemoryRecord(person_id=person_id)
+            self.npc_memory[person_id] = record
+        record.last_tone = tone
+        record.impact = impact
+        record.promise_integrity = promise_integrity
+        if exposure_event:
+            record.exposure_events.append(exposure_event)
+        record.last_case_id = case_id
+
+    def register_unresolved_thread(self, key: str, timer: int = 1) -> None:
+        self.unresolved_threads[key] = EscalationThread(key=key, timer=max(timer, 0))
+
+    def resolve_thread(self, key: str) -> None:
+        self.unresolved_threads.pop(key, None)
+
+    def _apply_consequence_memory(
+        self,
+        outcome: CaseOutcome,
+        case_id: str,
+        location_name: str,
+    ) -> None:
+        rep = self.location_reputation_for(location_name)
+        if outcome.arrest_result == ArrestResult.SUCCESS:
+            rep.trust_trend = max(-3, min(3, rep.trust_trend + 1))
+            rep.friction = max(0, rep.friction - 1)
+            rep.safety_noise = max(0, rep.safety_noise - 1)
+            return
+        if outcome.arrest_result == ArrestResult.FAILED:
+            rep.trust_trend = max(-3, min(3, rep.trust_trend - 1))
+            rep.friction = min(3, rep.friction + 1)
+            rep.safety_noise = min(3, rep.safety_noise + 1)
+            rep.heat = min(3, rep.heat + 1)
+            mistake = self.mistake_history.get("wrong_arrest")
+            if mistake is None:
+                mistake = MistakeRecord(key="wrong_arrest")
+                self.mistake_history[mistake.key] = mistake
+            mistake.count += 1
+            mistake.last_case_id = case_id
+
+    def _advance_unresolved_threads(self, case_id: str) -> None:
+        for thread in self.unresolved_threads.values():
+            if thread.timer > 0:
+                thread.timer -= 1
+                continue
+            thread.severity = min(3, thread.severity + 1)
+            thread.timer = 1
+            if thread.severity == 2:
+                thread.mutation = "new victims and wider rumor spread"
+            elif thread.severity >= 3:
+                thread.mutation = "copycat noise and tighter political scrutiny"
+            mistake = self.mistake_history.get(f"ignored:{thread.key}")
+            if mistake is None:
+                mistake = MistakeRecord(key=f"ignored:{thread.key}")
+                self.mistake_history[mistake.key] = mistake
+            mistake.count += 1
+            mistake.last_case_id = case_id
