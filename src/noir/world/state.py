@@ -65,6 +65,47 @@ class ClosingInState:
 
 
 @dataclass
+class TensionState:
+    """Campaign-level tension wave value (0-100) plus short history.
+
+    The history is the last several values, used so that endings and
+    pacing can read sustained pressure rather than a single instant.
+    """
+
+    value: int = 20
+    history: list[int] = field(default_factory=list)
+    peak: int = 20
+
+    def record(self, new_value: int) -> None:
+        bounded = max(0, min(int(new_value), 100))
+        self.history.append(self.value)
+        if len(self.history) > 8:
+            del self.history[0 : len(self.history) - 8]
+        self.value = bounded
+        if bounded > self.peak:
+            self.peak = bounded
+
+
+@dataclass
+class NemesisCampaignState:
+    """Counters for the slow-burn nemesis arc across a season.
+
+    ``clock`` is the nemesis's own plan progress and ticks forward each
+    episode regardless of player action. ``awareness`` rises when the
+    player makes loud or public moves and feeds back into how hostile
+    nemesis-driven events are. ``confronted`` flips once both player
+    progress and awareness have crossed their thresholds.
+    """
+
+    clock: int = 0
+    clock_max: int = 10
+    awareness: int = 0
+    awareness_max: int = 10
+    confronted: bool = False
+    coup_fired: bool = False
+
+
+@dataclass
 class DetectiveIdentityState:
     coercive: int = 0
     analytical: int = 0
@@ -118,6 +159,10 @@ class CampaignState:
     ending_flags: list[str] = field(default_factory=list)
     endgame_state: EndgameState = EndgameState.INACTIVE
     endgame_result: str | None = None
+    tension: TensionState = field(default_factory=TensionState)
+    nemesis_arc: NemesisCampaignState = field(default_factory=NemesisCampaignState)
+    season_theme: str = ""
+    season_beats_completed: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -140,6 +185,21 @@ class CampaignState:
             "ending_flags": list(self.ending_flags),
             "endgame_state": self.endgame_state.value,
             "endgame_result": self.endgame_result,
+            "tension": {
+                "value": self.tension.value,
+                "history": list(self.tension.history),
+                "peak": self.tension.peak,
+            },
+            "nemesis_arc": {
+                "clock": self.nemesis_arc.clock,
+                "clock_max": self.nemesis_arc.clock_max,
+                "awareness": self.nemesis_arc.awareness,
+                "awareness_max": self.nemesis_arc.awareness_max,
+                "confronted": self.nemesis_arc.confronted,
+                "coup_fired": self.nemesis_arc.coup_fired,
+            },
+            "season_theme": self.season_theme,
+            "season_beats_completed": list(self.season_beats_completed),
         }
 
     @classmethod
@@ -159,6 +219,21 @@ class CampaignState:
             dominant=identity_payload.get("dominant"),
             dominant_streak=int(identity_payload.get("dominant_streak", 0)),
         )
+        tension_payload = payload.get("tension", {}) or {}
+        tension = TensionState(
+            value=int(tension_payload.get("value", 20)),
+            history=[int(v) for v in (tension_payload.get("history", []) or [])],
+            peak=int(tension_payload.get("peak", tension_payload.get("value", 20))),
+        )
+        nemesis_payload = payload.get("nemesis_arc", {}) or {}
+        nemesis_arc = NemesisCampaignState(
+            clock=int(nemesis_payload.get("clock", 0)),
+            clock_max=int(nemesis_payload.get("clock_max", 10)),
+            awareness=int(nemesis_payload.get("awareness", 0)),
+            awareness_max=int(nemesis_payload.get("awareness_max", 10)),
+            confronted=bool(nemesis_payload.get("confronted", False)),
+            coup_fired=bool(nemesis_payload.get("coup_fired", False)),
+        )
         return cls(
             season_index=int(payload.get("season_index", 1)),
             episode_index=int(payload.get("episode_index", 1)),
@@ -168,6 +243,10 @@ class CampaignState:
             ending_flags=list(payload.get("ending_flags", []) or []),
             endgame_state=EndgameState(payload.get("endgame_state", EndgameState.INACTIVE.value)),
             endgame_result=payload.get("endgame_result"),
+            tension=tension,
+            nemesis_arc=nemesis_arc,
+            season_theme=str(payload.get("season_theme", "") or ""),
+            season_beats_completed=list(payload.get("season_beats_completed", []) or []),
         )
 
 _ENDGAME_PATTERN_MIN = 2
@@ -261,7 +340,26 @@ class WorldState:
             location_name=location_name,
         )
         self._advance_unresolved_threads(case_id)
+        tension_notes = self._apply_tension_for_outcome(outcome.arrest_result)
+        notes.extend(tension_notes)
         return notes
+
+    def _apply_tension_for_outcome(self, arrest_result: ArrestResult) -> list[str]:
+        from noir.showrunner.tension import TensionEvent, apply_event
+
+        event_map = {
+            ArrestResult.SUCCESS: TensionEvent.CASE_SUCCESS,
+            ArrestResult.PARTIAL: TensionEvent.CASE_PARTIAL,
+            ArrestResult.FAILED: TensionEvent.CASE_FAILED,
+        }
+        event = event_map.get(arrest_result)
+        if event is None:
+            return []
+        before = self.campaign.tension.value
+        after = apply_event(self.campaign, event)
+        if after != before:
+            return [f"Campaign tension shifted from {before} to {after}."]
+        return []
 
     def case_start_modifiers(
         self, district: str, location_name: str
@@ -321,8 +419,53 @@ class WorldState:
             briefing_lines=briefing_lines,
         )
 
-    def advance_episode(self) -> None:
+    def advance_episode(self) -> list[str]:
+        notes = self._tick_nemesis_clock()
         advance_campaign_episode(self.campaign)
+        return notes
+
+    def _tick_nemesis_clock(self) -> list[str]:
+        from noir.showrunner.tension import TensionEvent, apply_event
+
+        arc = self.campaign.nemesis_arc
+        if self.campaign.endgame_state == EndgameState.RESOLVED:
+            return []
+        if arc.clock >= arc.clock_max:
+            return []
+        arc.clock = min(arc.clock_max, arc.clock + 1)
+        apply_event(self.campaign, TensionEvent.NEMESIS_TICK)
+        notes: list[str] = []
+        if arc.clock >= arc.clock_max and not arc.coup_fired:
+            arc.coup_fired = True
+            notes.append(
+                "Nemesis clock has run out; the antagonist's own plan has reached its move."
+            )
+        elif arc.clock == arc.clock_max - 2:
+            notes.append("The nemesis's plan is closing on its own deadline.")
+        return notes
+
+    def raise_nemesis_awareness(self, delta: int = 1) -> list[str]:
+        from noir.showrunner.tension import TensionEvent, apply_event
+
+        arc = self.campaign.nemesis_arc
+        before = arc.awareness
+        arc.awareness = max(0, min(arc.awareness_max, arc.awareness + int(delta)))
+        notes: list[str] = []
+        if arc.awareness > before:
+            apply_event(self.campaign, TensionEvent.PUBLIC_MOVE)
+        if not arc.confronted and self._confrontation_ready():
+            arc.confronted = True
+            apply_event(self.campaign, TensionEvent.NEMESIS_CONFRONT)
+            notes.append(
+                "Nemesis is now aware enough to push back directly; expect retaliation."
+            )
+        return notes
+
+    def _confrontation_ready(self) -> bool:
+        arc = self.campaign.nemesis_arc
+        closing = self.campaign.closing_in
+        player_progress = closing.pattern + closing.narrowing + closing.proof
+        return player_progress >= 3 and arc.awareness >= max(3, arc.awareness_max // 2)
 
     def ensure_case_queue(self, target_size: int = 1) -> None:
         ensure_scheduled_case_queue(
@@ -346,14 +489,22 @@ class WorldState:
         pattern_type: str | None,
         profile_used: bool,
         proof_met: bool,
-    ) -> None:
+    ) -> list[str]:
+        progress = 0
         if pattern_type == "signature":
             self.campaign.closing_in.pattern += 1
+            progress += 1
         if profile_used:
             self.campaign.closing_in.narrowing += 1
+            progress += 1
         if proof_met:
             self.campaign.closing_in.proof += 1
+            progress += 1
         self._check_endgame_trigger()
+        notes: list[str] = []
+        if progress > 0:
+            notes.extend(self.raise_nemesis_awareness(progress))
+        return notes
 
     def endgame_ready(self) -> bool:
         return self.campaign.endgame_state in {EndgameState.READY, EndgameState.ACTIVE}

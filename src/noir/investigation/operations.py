@@ -8,6 +8,11 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from noir.domain.enums import ConfidenceBand
+from noir.investigation.legal import (
+    LegalCheck,
+    ProbableCause,
+    evaluate_probable_cause,
+)
 from noir.presentation.evidence import (
     CCTVReport,
     EvidenceItem,
@@ -86,57 +91,36 @@ def _resolve_warrant(
     hypothesis: Hypothesis | None,
 ) -> OperationOutcome:
     evidence_items = _collect_evidence(presentation, plan.evidence_ids)
-    if len(evidence_items) < 2:
-        return OperationOutcome(
-            tier=OperationTier.FAILED,
-            summary="Warrant denied. The packet is too thin.",
-            notes=["Provide at least two corroborating supports."],
-            pressure_delta=1,
-            trust_delta=-1,
-        )
+    check = evaluate_probable_cause(evidence_items, hypothesis)
+    return _warrant_outcome_for(check)
 
-    testimonial = [item for item in evidence_items if _is_testimonial(item)]
-    physical = [item for item in evidence_items if _is_physical(item)]
-    has_weak = any(item.confidence == ConfidenceBand.WEAK for item in evidence_items)
 
-    timeline_ok, timeline_note = _timeline_coherent(
-        testimonial,
-        hypothesis.suspect_id if hypothesis else None,
-    )
-
-    if physical:
-        if has_weak:
-            return OperationOutcome(
-                tier=OperationTier.PARTIAL,
-                summary="Warrant granted with limits.",
-                notes=["Support is mixed; scope is narrowed."],
-                pressure_delta=1,
-            )
+def _warrant_outcome_for(check: LegalCheck) -> OperationOutcome:
+    if check.verdict == ProbableCause.SUFFICIENT:
         return OperationOutcome(
             tier=OperationTier.CLEAN,
             summary="Warrant granted.",
             notes=["Support meets probable cause standards."],
         )
-
-    if len(testimonial) >= 2 and timeline_ok:
-        notes = [
-            "Support relies on testimony and a coherent timeline.",
-            "Scope is likely to be limited.",
-        ]
+    if check.verdict == ProbableCause.LIMITED:
         return OperationOutcome(
             tier=OperationTier.PARTIAL,
             summary="Warrant granted with limits.",
-            notes=notes,
+            notes=list(check.reasons),
             pressure_delta=1,
         )
-
-    notes = ["Testimonial support is not sufficiently corroborated."]
-    if timeline_note:
-        notes.append(timeline_note)
+    if check.supports_count < 2:
+        return OperationOutcome(
+            tier=OperationTier.FAILED,
+            summary="Warrant denied. The packet is too thin.",
+            notes=list(check.reasons),
+            pressure_delta=1,
+            trust_delta=-1,
+        )
     return OperationOutcome(
         tier=OperationTier.FAILED,
         summary="Warrant denied. Support is insufficient.",
-        notes=notes,
+        notes=list(check.reasons),
         pressure_delta=1,
         trust_delta=-1,
     )
