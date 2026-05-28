@@ -66,6 +66,8 @@ def test_save_load_round_trip_preserves_investigation_state(tmp_path) -> None:
                 last_claims=["presence", "motive"],
                 motive_to_lie=True,
                 contradiction_emitted=True,
+                confrontation_active=True,
+                confession_recorded=True,
                 dialog_node_id="THEME_CIRCUMSTANCE",
                 approach_counts={"baseline": 1, "theme:circumstance": 2},
                 approach_history=["baseline", "theme:circumstance", "theme:circumstance"],
@@ -127,6 +129,8 @@ def test_save_load_round_trip_preserves_investigation_state(tmp_path) -> None:
     assert loaded_state.profile is not None
     assert loaded_state.profile.drive == ProfileDrive.MISSION
     assert loaded_state.interviews[str(witness_id)].dialog_node_id == "THEME_CIRCUMSTANCE"
+    assert loaded_state.interviews[str(witness_id)].confrontation_active is True
+    assert loaded_state.interviews[str(witness_id)].confession_recorded is True
     assert loaded_state.interviews[str(witness_id)].approach_counts["theme:circumstance"] == 2
     assert loaded_state.interviews[str(witness_id)].prompt_history == ["theme:circumstance:Push motive"]
     assert loaded_presentation.evidence[0].summary == "Witness statement"

@@ -24,6 +24,7 @@ from noir.investigation.dialog_graph import (
     resolve_dialog_role_key,
     select_choice_index,
 )
+from noir.investigation.dialog_runtime import known_confrontation_evidence
 from noir.investigation.interviews import (
     InterviewApproach,
     InterviewPhase,
@@ -62,6 +63,7 @@ from noir.investigation.operations import (
 )
 from noir.investigation.results import ActionOutcome, ActionResult, InvestigationState
 from noir.locations.profiles import load_location_profiles
+from noir.narrative.debriefs import build_interview_break_statement
 from noir.narrative.styles import build_witness_line
 from noir.presentation.evidence import CCTVReport, EvidenceItem, PresentationCase, WitnessStatement
 from noir.naming import load_name_generator
@@ -306,6 +308,10 @@ def interview(
     suspect_name = suspect.name if suspect else "someone"
     suspect_id = suspect.id if suspect else None
     truth_seen = bool(base_statement and suspect_id and suspect_id in base_statement.observed_person_ids)
+    interview_target_is_suspect = (
+        RoleTag.OFFENDER in person.role_tags or RoleTag.SUSPECT in person.role_tags
+    )
+    true_offender_interview = RoleTag.OFFENDER in person.role_tags
 
     def _format_hour(hour: int) -> str:
         value = hour % 24
@@ -328,6 +334,21 @@ def interview(
         if end <= 17:
             return (min(23, end + 4), min(23, end + 6))
         return (max(0, start - 6), max(0, start - 4))
+
+    def _window_for_item(item: EvidenceItem) -> tuple[int, int] | None:
+        if isinstance(item, WitnessStatement):
+            return item.reported_time_window
+        if isinstance(item, CCTVReport):
+            return item.time_window
+        return None
+
+    def _windows_overlap(
+        left: tuple[int, int] | None,
+        right: tuple[int, int] | None,
+    ) -> bool:
+        if left is None or right is None:
+            return False
+        return not (left[1] < right[0] or right[1] < left[0])
 
     def _maybe_add_detail_statement(
         revealed: list[EvidenceItem],
@@ -557,9 +578,153 @@ def interview(
                 or str(contradiction_id) == str(person_id)
             )
         )
+        confrontation_evidence = (
+            known_confrontation_evidence(truth, presentation, state, person_id)
+            if interview_target_is_suspect
+            else []
+        )
+        contradiction_ready = bool(confrontation_evidence)
+        if contradiction_ready and base_statement is not None:
+            contradiction_ready = (
+                person_id not in base_statement.observed_person_ids
+                or any(
+                    not _windows_overlap(base_window, _window_for_item(item))
+                    for item in confrontation_evidence
+                )
+            )
+        suspect_confrontation = (
+            interview_target_is_suspect
+            and approach == InterviewApproach.PRESSURE
+            and contradiction_ready
+            and not interview_state.confession_recorded
+        )
         lie_type = "denial"
         if lie_bias and rng.random() > 0.5:
             lie_type = "misdirection"
+        if suspect_confrontation:
+            apply_action(
+                truth,
+                EventKind.CONFRONTATION,
+                state.time,
+                location_id,
+                participants=[person_id],
+                metadata={"action": "interview_confrontation"},
+            )
+            interview_state.phase = InterviewPhase.CONFRONTATION
+            interview_state.confrontation_active = True
+            notes.append("The contradiction lands; the interview turns confrontational.")
+            confrontation_window = base_window
+            for item in confrontation_evidence:
+                window = _window_for_item(item)
+                if window is not None:
+                    confrontation_window = window
+                    break
+            if confrontation_window is None:
+                confrontation_window = fuzz_time(kill_event.timestamp, sigma=0.75, rng=rng)
+            corroboration_count = len(confrontation_evidence)
+            has_cctv = any(isinstance(item, CCTVReport) for item in confrontation_evidence)
+            full_confession = true_offender_interview and (corroboration_count >= 2 or has_cctv)
+            partial_confession = true_offender_interview and not full_confession and (
+                interview_state.fatigue >= 0.35 or repeat_count > 0
+            )
+            if full_confession or partial_confession:
+                interview_state.phase = InterviewPhase.CONFESSION
+                interview_state.confrontation_active = False
+                interview_state.confession_recorded = True
+                confidence = (
+                    ConfidenceBand.STRONG if full_confession else ConfidenceBand.MEDIUM
+                )
+                statement = build_interview_break_statement(
+                    rng.fork("suspect-confession"),
+                    truth,
+                    person_id,
+                    partial=partial_confession,
+                )
+                hooks = baseline_hooks(
+                    interview_state.baseline_profile,
+                    statement,
+                    [
+                        "Contradiction lands cleanly.",
+                        "The suspect stops fighting the timeline.",
+                    ],
+                )
+                evidence = WitnessStatement(
+                    evidence_type=EvidenceType.TESTIMONIAL,
+                    summary="Suspect statement (confession)",
+                    source="Interview",
+                    time_collected=state.time,
+                    confidence=confidence,
+                    witness_id=person_id,
+                    statement=statement,
+                    reported_time_window=confrontation_window,
+                    location_id=location_id,
+                    observed_person_ids=[person_id],
+                    uncertainty_hooks=hooks,
+                )
+                presentation.evidence.append(evidence)
+                state.knowledge.known_evidence.append(evidence.id)
+                revealed = [evidence]
+                interview_state.last_claims = ["presence", "opportunity", "confession"]
+                notes.append("The suspect breaks in the interview room.")
+                notes.append("Confession recorded.")
+                result_summary = "Interview (pressure) breaks the suspect into a confession."
+            else:
+                confidence = (
+                    ConfidenceBand.MEDIUM
+                    if corroboration_count >= 2 or has_cctv
+                    else ConfidenceBand.WEAK
+                )
+                statement = build_interview_break_statement(
+                    rng.fork("suspect-denial"),
+                    truth,
+                    person_id,
+                    denial=True,
+                )
+                hooks = baseline_hooks(
+                    interview_state.baseline_profile,
+                    statement,
+                    [
+                        "Contradiction drives the exchange into confrontation.",
+                        "The suspect resists the case file.",
+                    ],
+                )
+                evidence = WitnessStatement(
+                    evidence_type=EvidenceType.TESTIMONIAL,
+                    summary="Suspect statement (confrontation)",
+                    source="Interview",
+                    time_collected=state.time,
+                    confidence=confidence,
+                    witness_id=person_id,
+                    statement=statement,
+                    reported_time_window=confrontation_window,
+                    location_id=location_id,
+                    observed_person_ids=[],
+                    uncertainty_hooks=hooks,
+                )
+                presentation.evidence.append(evidence)
+                state.knowledge.known_evidence.append(evidence.id)
+                revealed = [evidence]
+                interview_state.last_claims = ["denial", "pressure"]
+                notes.append("The suspect resists the contradiction and gives ground only in tone.")
+                result_summary = "Interview (pressure) forces a direct confrontation."
+            if interview_state.baseline_profile is None:
+                interview_state.baseline_profile = build_baseline_profile(statement)
+            lead = lead_for_type(state, EvidenceType.TESTIMONIAL)
+            if lead and lead.status == LeadStatus.EXPIRED and revealed:
+                notes.extend(apply_lead_decay(lead, revealed))
+            elif revealed:
+                mark_lead_resolved(state, EvidenceType.TESTIMONIAL)
+            notes.extend(_apply_cooperation_decay(state, revealed))
+            return ActionResult(
+                action=ActionType.INTERVIEW,
+                outcome=ActionOutcome.SUCCESS,
+                summary=result_summary,
+                time_cost=time_cost,
+                pressure_cost=pressure_cost,
+                cooperation_change=coop_delta,
+                revealed=revealed,
+                notes=notes,
+            )
         if lie_bias:
             shift = rng.choice([-3, 3])
             time_window = (

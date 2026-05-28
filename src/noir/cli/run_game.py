@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 from noir import config
 from noir.cases.archetypes import CaseArchetype
 from noir.cases.truth_generator import generate_case
-from noir.cli.support import dialog_role_key_for_witness, maybe_print_investigation_guidance
+from noir.cli.support import maybe_print_investigation_guidance
 from noir.deduction.board import ClaimType, DeductionBoard, Hypothesis, ReasoningStep
 from noir.deduction.scoring import (
     auto_build_reasoning_steps,
@@ -37,7 +37,7 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
-from noir.investigation.dialog_graph import load_interview_graph
+from noir.investigation.dialog_runtime import visible_dialog_prompt_options
 from noir.investigation.operations import OperationTier, OperationType, WarrantType
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
 from noir.investigation.runtime import apply_runtime_rules
@@ -232,32 +232,20 @@ def _choose_warrant_type() -> WarrantType | None:
     return _choose_enum(WarrantType, lambda value: labels.get(value, value.value))
 
 
-def _choose_dialog_choice(truth, state: InvestigationState, witness_id) -> int | None:
-    role_key = dialog_role_key_for_witness(truth, state, witness_id)
-    graph = load_interview_graph(role_key)
-    if graph is None:
-        return None
-    interview_state = state.interviews.get(str(witness_id))
-    node_id = graph.root_node_id
-    if interview_state and interview_state.dialog_node_id:
-        node_id = interview_state.dialog_node_id
-    if not graph.has_node(node_id):
-        node_id = graph.root_node_id
-    node = graph.node(node_id)
-    if not node.choices:
-        node = graph.node(graph.root_node_id)
-    if not node.choices:
+def _choose_dialog_choice(truth, presentation, state: InvestigationState, witness_id) -> int | None:
+    _, _, options = visible_dialog_prompt_options(truth, presentation, state, witness_id)
+    if not options:
         return None
     print("Choose a prompt:")
-    for idx, choice in enumerate(node.choices, start=1):
-        print(f"{idx}) {choice.text}")
+    for idx, option in enumerate(options, start=1):
+        print(f"{idx}) {option.choice.text}")
     choice = input("> ").strip()
     if not choice.isdigit():
         return None
     index = int(choice) - 1
-    if index < 0 or index >= len(node.choices):
+    if index < 0 or index >= len(options):
         return None
-    return index
+    return options[index].raw_index
 
 
 def _restore_investigation_snapshot(
@@ -1336,6 +1324,7 @@ def main() -> None:
         print("16) Raid")
         print("17) Save investigation")
         print("18) Load investigation")
+        print("19) Nemesis dossier")
         print("g) Toggle gaze")
         choice = input("> ").strip().lower()
         if choice == "q":
@@ -1422,7 +1411,7 @@ def main() -> None:
                 if theme is None:
                     print("Invalid theme selection.")
                     continue
-            dialog_choice_index = _choose_dialog_choice(truth, state, selection[1].id)
+            dialog_choice_index = _choose_dialog_choice(truth, presentation, state, selection[1].id)
             result = interview(
                 truth,
                 presentation,
@@ -1677,6 +1666,10 @@ def main() -> None:
             )
             selected_evidence_id = state.knowledge.known_evidence[0] if state.knowledge.known_evidence else None
             continue
+        elif choice == "19":
+            for line in world.nemesis_dossier_lines():
+                print(line)
+            continue
         else:
             print("Unknown action.")
             continue
@@ -1821,13 +1814,22 @@ def main() -> None:
             for note in outcome.notes:
                 print(f"- {note}")
             debrief_rng = base_rng.fork(f"debrief-{case_index}")
-            statement_lines = build_post_arrest_statement(
-                debrief_rng, truth, board, validation, outcome.arrest_result
+            suspect_interview_state = state.interviews.get(str(board.hypothesis.suspect_id))
+            confession_already_recorded = bool(
+                suspect_interview_state and suspect_interview_state.confession_recorded
             )
+            statement_lines = []
+            if not confession_already_recorded:
+                statement_lines = build_post_arrest_statement(
+                    debrief_rng, truth, board, validation, outcome.arrest_result
+                )
             debrief_notes = []
-            if statement_lines:
+            if confession_already_recorded:
+                debrief_notes = ["Interview-room confession already on file."]
+            elif statement_lines:
                 debrief_notes = [f"Post-arrest: {statement_lines[0]}"]
             nemesis_notes: list[str] = []
+            method_compromised = False
             if world.nemesis_state and truth.case_meta.get("nemesis_case"):
                 visibility = int(truth.case_meta.get("nemesis_visibility", 1))
                 method_compromised = _nemesis_method_compromised(presentation, state)
@@ -1886,6 +1888,27 @@ def main() -> None:
             if identity_notes:
                 debrief_notes.extend(identity_notes)
             world.update_closing_in(pattern_type, profile_used, proof_met)
+            dossier_updated = world.update_nemesis_dossier(
+                truth.case_id,
+                signature_meta=(
+                    truth.case_meta.get("nemesis_signature")
+                    if isinstance(truth.case_meta.get("nemesis_signature"), dict)
+                    else None
+                ),
+                pattern_label=pattern_addendum.label if pattern_addendum else None,
+                pattern_observations=pattern_addendum.observations if pattern_addendum else None,
+                nemesis_case=bool(truth.case_meta.get("nemesis_case")),
+                method_category=(
+                    str(truth.case_meta.get("nemesis_method") or "").strip() or None
+                ),
+                nemesis_tone=(
+                    str(truth.case_meta.get("nemesis_tone") or "").strip() or None
+                ),
+                method_compromised=method_compromised,
+                outcome_notes=nemesis_notes + identity_notes,
+            )
+            if dossier_updated:
+                print("Nemesis dossier updated.")
             early = check_early_ending(world)
             if early:
                 delete_save(truth.case_id)

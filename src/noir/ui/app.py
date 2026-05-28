@@ -39,7 +39,7 @@ from noir.investigation.actions import (
     visit_scene,
 )
 from noir.investigation.costs import ActionType, PRESSURE_LIMIT, TIME_LIMIT
-from noir.investigation.dialog_graph import load_interview_graph, resolve_dialog_role_key
+from noir.investigation.dialog_runtime import visible_dialog_prompt_options
 from noir.investigation.interviews import InterviewApproach, InterviewTheme
 from noir.investigation.guidance import investigation_guidance_lines
 from noir.investigation.runtime import apply_runtime_rules
@@ -693,6 +693,8 @@ class Phase05App(App):
                     lines.extend(self.last_pattern_addendum.render())
                 else:
                     lines.append("(none)")
+            elif payload and payload.get("key") == "nemesis":
+                lines.extend(self.world.nemesis_dossier_lines())
             elif payload and payload.get("key") == "world":
                 context_lines = self.world.context_lines(self.district, self.location_name)
                 if context_lines:
@@ -787,6 +789,7 @@ class Phase05App(App):
                 {"type": "summary", "key": "case", "label": "Case status"},
                 {"type": "summary", "key": "last_action", "label": "Last action"},
                 {"type": "summary", "key": "pattern", "label": "Pattern addendum"},
+                {"type": "summary", "key": "nemesis", "label": "Nemesis dossier"},
                 {"type": "summary", "key": "world", "label": "World context"},
             ]
             if self.last_post_arrest_statement:
@@ -1612,13 +1615,24 @@ class Phase05App(App):
         for note in outcome.notes:
             self._write(f"- {note}")
         debrief_rng = self.base_rng.fork(f"debrief-{self.case_index}")
-        debrief_lines = build_post_arrest_statement(
-            debrief_rng, self.truth, self.board, validation, outcome.arrest_result
+        suspect_interview_state = self.state.interviews.get(
+            str(self.board.hypothesis.suspect_id)
         )
+        confession_already_recorded = bool(
+            suspect_interview_state and suspect_interview_state.confession_recorded
+        )
+        debrief_lines = []
+        if not confession_already_recorded:
+            debrief_lines = build_post_arrest_statement(
+                debrief_rng, self.truth, self.board, validation, outcome.arrest_result
+            )
         debrief_notes = []
-        if debrief_lines:
+        if confession_already_recorded:
+            debrief_notes = ["Interview-room confession already on file."]
+        elif debrief_lines:
             debrief_notes = [f"Post-arrest: {debrief_lines[0]}"]
         nemesis_notes: list[str] = []
+        method_compromised = False
         if self.world.nemesis_state and self.case_facts.get("nemesis_case"):
             visibility = int(self.case_facts.get("nemesis_visibility", 1))
             method_category = self.case_facts.get("nemesis_method") or None
@@ -1680,6 +1694,23 @@ class Phase05App(App):
         if identity_notes:
             debrief_notes.extend(identity_notes)
         self.world.update_closing_in(pattern_type, profile_used, proof_met)
+        dossier_updated = self.world.update_nemesis_dossier(
+            self.truth.case_id,
+            signature_meta=(
+                self.truth.case_meta.get("nemesis_signature")
+                if isinstance(self.truth.case_meta.get("nemesis_signature"), dict)
+                else None
+            ),
+            pattern_label=pattern_addendum.label if pattern_addendum else None,
+            pattern_observations=pattern_addendum.observations if pattern_addendum else None,
+            nemesis_case=bool(self.case_facts.get("nemesis_case")),
+            method_category=(str(self.case_facts.get("nemesis_method") or "").strip() or None),
+            nemesis_tone=(str(self.case_facts.get("nemesis_tone") or "").strip() or None),
+            method_compromised=method_compromised,
+            outcome_notes=nemesis_notes + identity_notes,
+        )
+        if dossier_updated:
+            self._write("Nemesis dossier updated.")
         early_ending = check_early_ending(self.world)
         if early_ending:
             self._show_ending(early_ending)
@@ -1903,59 +1934,24 @@ class Phase05App(App):
         approach: InterviewApproach,
         theme: InterviewTheme | None,
     ) -> bool:
-        person = self.truth.people.get(witness_id) if self.truth else None
-        if person is None:
+        if self.truth is None or self.presentation is None:
             return False
-        interview_state = self.state.interviews.get(str(witness_id)) if self.state else None
-        relationship_closeness = None
-        relationship_type = None
-        if self.truth is not None:
-            victim = next(
-                (candidate for candidate in self.truth.people.values() if RoleTag.VICTIM in candidate.role_tags),
-                None,
-            )
-            offender = next(
-                (candidate for candidate in self.truth.people.values() if RoleTag.OFFENDER in candidate.role_tags),
-                None,
-            )
-            for related_person in (victim, offender):
-                if related_person is None:
-                    continue
-                relation = self.truth.relationship_between(witness_id, related_person.id)
-                if not relation:
-                    continue
-                relationship_closeness = str(relation.get("closeness", "") or "")
-                relationship_type = str(relation.get("relationship_type", "") or "")
-                if relationship_closeness.lower() == "intimate":
-                    break
-        role_key = resolve_dialog_role_key(
-            person.role_tags,
-            person.traits if isinstance(person.traits, dict) else None,
-            motive_to_lie=bool(interview_state and interview_state.motive_to_lie),
-            relationship_closeness=relationship_closeness,
-            relationship_type=relationship_type,
+        _, _, options = visible_dialog_prompt_options(
+            self.truth,
+            self.presentation,
+            self.state,
+            witness_id,
         )
-        graph = load_interview_graph(role_key)
-        if graph is None:
-            return False
-        node_id = graph.root_node_id
-        if interview_state and interview_state.dialog_node_id:
-            node_id = interview_state.dialog_node_id
-        if not graph.has_node(node_id):
-            node_id = graph.root_node_id
-        node = graph.node(node_id)
-        if not node.choices:
-            node = graph.node(graph.root_node_id)
-        if not node.choices:
+        if not options:
             return False
         self.prompt_state = PromptState(
             step="interview_dialog",
             data={"witness_id": witness_id, "approach": approach, "theme": theme},
-            options=list(node.choices),
+            options=list(options),
         )
         lines = ["Choose a prompt:"]
-        for idx, choice in enumerate(self.prompt_state.options, start=1):
-            lines.append(f"{idx}) {choice.text}")
+        for idx, option in enumerate(self.prompt_state.options, start=1):
+            lines.append(f"{idx}) {option.choice.text}")
         self._set_prompt("Interview prompt", lines)
         self._set_prompt_active(True)
         return True
@@ -2159,6 +2155,7 @@ class Phase05App(App):
             if selection is None:
                 self._write("Invalid choice.")
                 return
+            selected_option = self.prompt_state.options[selection]
             witness_id = self.prompt_state.data["witness_id"]
             approach = self.prompt_state.data.get("approach", InterviewApproach.BASELINE)
             theme = self.prompt_state.data.get("theme")
@@ -2172,7 +2169,7 @@ class Phase05App(App):
                 self.location_id,
                 approach=approach,
                 theme=theme,
-                dialog_choice_index=selection,
+                dialog_choice_index=selected_option.raw_index,
             )
             self._apply_action_result(result)
             return

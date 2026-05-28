@@ -14,6 +14,7 @@ from noir.showrunner.scheduler import (
     ensure_case_queue as ensure_scheduled_case_queue,
     pop_next_case as pop_scheduled_case,
 )
+from noir.util.grammar import normalize_line
 from noir.util.rng import Rng
 
 
@@ -65,6 +66,18 @@ class ClosingInState:
 
 
 @dataclass
+class NemesisDossierEntry:
+    case_id: str
+    headline: str
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class NemesisDossierState:
+    entries: list[NemesisDossierEntry] = field(default_factory=list)
+
+
+@dataclass
 class DetectiveIdentityState:
     coercive: int = 0
     analytical: int = 0
@@ -80,6 +93,7 @@ class CampaignState:
     episode_index: int = 1
     case_queue: list[dict[str, str]] = field(default_factory=list)
     closing_in: ClosingInState = field(default_factory=ClosingInState)
+    dossier: NemesisDossierState = field(default_factory=NemesisDossierState)
     identity: DetectiveIdentityState = field(default_factory=DetectiveIdentityState)
     ending_flags: list[str] = field(default_factory=list)
     endgame_state: EndgameState = EndgameState.INACTIVE
@@ -94,6 +108,16 @@ class CampaignState:
                 "pattern": self.closing_in.pattern,
                 "narrowing": self.closing_in.narrowing,
                 "proof": self.closing_in.proof,
+            },
+            "dossier": {
+                "entries": [
+                    {
+                        "case_id": entry.case_id,
+                        "headline": entry.headline,
+                        "notes": list(entry.notes),
+                    }
+                    for entry in self.dossier.entries
+                ]
             },
             "identity": {
                 "coercive": self.identity.coercive,
@@ -116,6 +140,22 @@ class CampaignState:
             narrowing=int(closing.get("narrowing", 0)),
             proof=int(closing.get("proof", 0)),
         )
+        dossier_payload = payload.get("dossier", {}) or {}
+        dossier = NemesisDossierState(
+            entries=[
+                NemesisDossierEntry(
+                    case_id=str(entry.get("case_id", "")),
+                    headline=str(entry.get("headline", "Cross-case note")),
+                    notes=[
+                        str(note)
+                        for note in list(entry.get("notes", []) or [])
+                        if str(note).strip()
+                    ],
+                )
+                for entry in list(dossier_payload.get("entries", []) or [])
+                if str(entry.get("case_id", "")).strip()
+            ]
+        )
         identity_payload = payload.get("identity", {}) or {}
         identity = DetectiveIdentityState(
             coercive=int(identity_payload.get("coercive", 0)),
@@ -130,6 +170,7 @@ class CampaignState:
             episode_index=int(payload.get("episode_index", 1)),
             case_queue=list(payload.get("case_queue", []) or []),
             closing_in=closing_in,
+            dossier=dossier,
             identity=identity,
             ending_flags=list(payload.get("ending_flags", []) or []),
             endgame_state=EndgameState(payload.get("endgame_state", EndgameState.INACTIVE.value)),
@@ -377,6 +418,138 @@ class WorldState:
                     notes.append(note)
         return notes
 
+    def update_nemesis_dossier(
+        self,
+        case_id: str,
+        *,
+        signature_meta: dict[str, str] | None = None,
+        pattern_label: str | None = None,
+        pattern_observations: list[str] | None = None,
+        nemesis_case: bool = False,
+        method_category: str | None = None,
+        nemesis_tone: str | None = None,
+        method_compromised: bool = False,
+        outcome_notes: list[str] | None = None,
+    ) -> bool:
+        notes: list[str] = []
+        if signature_meta:
+            token = str(signature_meta.get("token", "detail") or "detail")
+            staging = str(signature_meta.get("staging", "placed") or "placed")
+            notes.append(f"Signature trace: {token} left {staging}.")
+            placement = str(signature_meta.get("placement_hint", "") or "").strip()
+            if placement:
+                notes.append(f"Placement note: {placement}.")
+            message = str(signature_meta.get("message", "") or "").strip()
+            if message and message != "silent":
+                notes.append(f"Message note: {message}.")
+        if pattern_label:
+            notes.append(f"Pattern assessment: {pattern_label}.")
+        for observation in pattern_observations or []:
+            cleaned = normalize_line(observation)
+            if cleaned:
+                notes.append(f"Observed detail: {cleaned}")
+        if nemesis_case and method_category:
+            notes.append(f"Method line: {str(method_category).strip()}.")
+        if nemesis_case and nemesis_tone:
+            notes.append(f"Tone on this file: {str(nemesis_tone).strip()}.")
+        if method_compromised:
+            notes.append("Adaptation note: the method line was pressured and may change.")
+        for note in outcome_notes or []:
+            cleaned = normalize_line(note)
+            lowered = cleaned.lower()
+            if not cleaned:
+                continue
+            if any(
+                token in lowered
+                for token in (
+                    "pattern file",
+                    "countermeasure",
+                    "adapts",
+                    "rapport tactics",
+                    "pressure tactics",
+                )
+            ):
+                notes.append(f"Follow-up: {cleaned}")
+
+        deduped_notes: list[str] = []
+        seen_notes: set[str] = set()
+        for note in notes:
+            if note in seen_notes:
+                continue
+            seen_notes.add(note)
+            deduped_notes.append(note)
+        if not deduped_notes:
+            return False
+
+        headline = "Cross-case note"
+        if pattern_label:
+            headline = pattern_label
+        elif signature_meta:
+            headline = "Signature trace"
+        elif method_compromised:
+            headline = "Behavioral shift"
+        elif nemesis_case:
+            headline = "Possible connected case"
+
+        entry = NemesisDossierEntry(
+            case_id=case_id,
+            headline=headline,
+            notes=deduped_notes,
+        )
+        entries = list(self.campaign.dossier.entries)
+        for idx, current in enumerate(entries):
+            if current.case_id == case_id:
+                entries[idx] = entry
+                self.campaign.dossier.entries = entries
+                return True
+        entries.append(entry)
+        self.campaign.dossier.entries = entries
+        return True
+
+    def nemesis_dossier_lines(self) -> list[str]:
+        entries = self.campaign.dossier.entries
+        closing = self.campaign.closing_in
+        if not entries and not any((closing.pattern, closing.narrowing, closing.proof)):
+            return ["Nemesis dossier", "No cross-case file entries yet."]
+
+        lines = [
+            "Nemesis dossier",
+            f"Cases filed: {len(entries)}.",
+            self._pattern_confidence_line(closing.pattern),
+            self._narrowing_confidence_line(closing.narrowing),
+            self._proof_confidence_line(closing.proof),
+        ]
+        if self.campaign.endgame_state == EndgameState.READY:
+            lines.append("Confrontation line is open; the file is ready for an endgame move.")
+        elif self.campaign.endgame_state == EndgameState.ACTIVE:
+            lines.append("Confrontation is active; the file has moved from theory to operation.")
+        if self.nemesis_state is not None:
+            lines.append(self._nemesis_exposure_line(self.nemesis_state.exposure))
+
+        signature_traces = self._dossier_values("Signature trace:")
+        if signature_traces:
+            lines.append("")
+            lines.append("Repeated traces")
+            for trace in signature_traces[:3]:
+                lines.append(f"- {trace}")
+
+        method_lines = self._dossier_values("Method line:")
+        if method_lines:
+            lines.append("")
+            lines.append("Method lines logged")
+            for method in method_lines[:3]:
+                lines.append(f"- {method}")
+
+        if entries:
+            lines.append("")
+            lines.append("Recent file notes")
+            for entry in reversed(entries[-3:]):
+                lines.append(f"- {entry.case_id}: {entry.headline}")
+                for note in entry.notes[:2]:
+                    lines.append(f"  {note}")
+
+        return lines
+
     def context_lines(self, district: str, location_name: str) -> list[str]:
         status = self.district_status_for(district)
         location_status = self.location_status_for(location_name)
@@ -471,3 +644,49 @@ class WorldState:
         if status == DistrictStatus.TENSE:
             return "Location status: tense. Expect tightened access."
         return "Location status: calm."
+
+    def _pattern_confidence_line(self, value: int) -> str:
+        if value >= 3:
+            return "Pattern recurrence: strong. Multiple incidents share a live trace."
+        if value == 2:
+            return "Pattern recurrence: credible. The file now shows more than one real overlap."
+        if value == 1:
+            return "Pattern recurrence: emerging. One filed incident is worth carrying forward."
+        return "Pattern recurrence: unproven. No stable cross-case trace yet."
+
+    def _narrowing_confidence_line(self, value: int) -> str:
+        if value >= 3:
+            return "Identity narrowing: strong. The pool behind the pattern is getting smaller."
+        if value == 2:
+            return "Identity narrowing: credible. Behavioural overlap is starting to point inward."
+        if value == 1:
+            return "Identity narrowing: preliminary. One line of profile fit has been filed."
+        return "Identity narrowing: open. The file still describes a method more than a person."
+
+    def _proof_confidence_line(self, value: int) -> str:
+        if value >= 2:
+            return "Proof line: strong. The file contains more than one arrest-grade connection."
+        if value == 1:
+            return "Proof line: partial. One prosecutable link exists, but the case is not closed."
+        return "Proof line: absent. The dossier is still mostly pattern and inference."
+
+    def _nemesis_exposure_line(self, value: int) -> str:
+        if value >= 4:
+            return "Offender pressure: high. The target is adapting under visible strain."
+        if value >= 2:
+            return "Offender pressure: elevated. The target has reason to adjust habits."
+        return "Offender pressure: low. The target is not acting cornered yet."
+
+    def _dossier_values(self, prefix: str) -> list[str]:
+        values: list[str] = []
+        seen: set[str] = set()
+        for entry in self.campaign.dossier.entries:
+            for note in entry.notes:
+                if not note.startswith(prefix):
+                    continue
+                value = note[len(prefix) :].strip()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                values.append(value)
+        return values

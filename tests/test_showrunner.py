@@ -59,3 +59,33 @@ def test_case_start_modifiers_reflect_recent_failed_case() -> None:
     assert modifiers.cooperation < 0.6
     assert modifiers.lead_deadline_delta >= 2
     assert any("Wrong-arrest fallout carries over" in line for line in modifiers.briefing_lines)
+
+
+def test_nemesis_dossier_summarizes_visible_cross_case_file() -> None:
+    world = WorldState()
+
+    updated = world.update_nemesis_dossier(
+        "case_007",
+        signature_meta={
+            "token": "tarot card",
+            "staging": "posed",
+            "message": "taunting note",
+            "placement_hint": "near the body",
+        },
+        pattern_label="Recurring Detail",
+        pattern_observations=["A staged token appears in plain view."],
+        nemesis_case=True,
+        method_category="sharp",
+        nemesis_tone="watchful",
+        method_compromised=True,
+        outcome_notes=["Pattern file notes a compromised method."],
+    )
+
+    lines = world.nemesis_dossier_lines()
+
+    assert updated is True
+    assert any("Cases filed: 1." in line for line in lines)
+    assert any("Repeated traces" in line for line in lines)
+    assert any("tarot card left posed." in line for line in lines)
+    assert any("Method lines logged" in line for line in lines)
+    assert any("case_007: Recurring Detail" in line for line in lines)

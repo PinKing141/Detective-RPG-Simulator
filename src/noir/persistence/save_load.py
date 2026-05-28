@@ -324,6 +324,8 @@ def _serialize_interview_state(state: InterviewState) -> dict:
 		"last_claims": list(state.last_claims),
 		"motive_to_lie": state.motive_to_lie,
 		"contradiction_emitted": state.contradiction_emitted,
+		"confrontation_active": state.confrontation_active,
+		"confession_recorded": state.confession_recorded,
 		"dialog_node_id": state.dialog_node_id,
 		"approach_counts": dict(state.approach_counts),
 		"approach_history": list(state.approach_history),
@@ -349,6 +351,8 @@ def _deserialize_interview_state(payload: dict) -> InterviewState:
 		last_claims=list(payload.get("last_claims", []) or []),
 		motive_to_lie=bool(payload.get("motive_to_lie", False)),
 		contradiction_emitted=bool(payload.get("contradiction_emitted", False)),
+		confrontation_active=bool(payload.get("confrontation_active", False)),
+		confession_recorded=bool(payload.get("confession_recorded", False)),
 		dialog_node_id=payload.get("dialog_node_id"),
 		approach_counts={
 			str(key): int(value)

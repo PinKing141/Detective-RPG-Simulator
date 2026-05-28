@@ -1,12 +1,14 @@
-"""Post-arrest statement vignettes (presentation only)."""
+"""Confession and denial vignette builders for arrests and interrogation beats."""
 
 from __future__ import annotations
+
+from uuid import UUID
 
 from noir.deduction.board import DeductionBoard
 from noir.deduction.validation import ValidationResult, ArrestTier
 from noir.investigation.outcomes import ArrestResult
 from noir.truth.graph import TruthState
-from noir.util.grammar import normalize_lines
+from noir.util.grammar import normalize_line, normalize_lines
 from noir.util.rng import Rng
 
 
@@ -88,12 +90,33 @@ _DEFLECTIONS = [
     "You already decided. You do not need me for that, and I am not going to help you feel better about it.",
 ]
 
+_INTERVIEW_CONFESSION_OPENERS = [
+    "All right. Put it down exactly like this.",
+    "Enough. I am not dragging this any further.",
+    "Fine. You want the truth, take it while I am still saying it.",
+]
 
-def _pick_name(truth: TruthState, board: DeductionBoard) -> tuple[str, str]:
+_INTERVIEW_PARTIAL_OPENERS = [
+    "Stop. I will give you part of it.",
+    "All right. Not all of it, but enough.",
+    "Fine. Write this much down.",
+]
+
+_INTERVIEW_DENIAL_OPENERS = [
+    "No. That is still not your clean ending.",
+    "You are leaning on the file harder than the file deserves.",
+    "That contradiction is yours to explain, not mine to fix.",
+]
+
+
+def _pick_case_names(
+    truth: TruthState,
+    suspect_id: UUID | None = None,
+) -> tuple[str, str]:
     suspect_name = "the suspect"
     victim_name = "the victim"
-    if board.hypothesis is not None:
-        suspect = truth.people.get(board.hypothesis.suspect_id)
+    if suspect_id is not None:
+        suspect = truth.people.get(suspect_id)
         if suspect:
             suspect_name = suspect.name
     victim = next(
@@ -105,6 +128,30 @@ def _pick_name(truth: TruthState, board: DeductionBoard) -> tuple[str, str]:
     return suspect_name, victim_name
 
 
+def build_interview_break_statement(
+    rng: Rng,
+    truth: TruthState,
+    suspect_id: UUID,
+    *,
+    partial: bool = False,
+    denial: bool = False,
+) -> str:
+    suspect_name, victim_name = _pick_case_names(truth, suspect_id)
+    if denial:
+        opener = rng.choice(_INTERVIEW_DENIAL_OPENERS)
+        line = rng.choice(_DENIALS + _DEFLECTIONS)
+    elif partial:
+        opener = rng.choice(_INTERVIEW_PARTIAL_OPENERS)
+        line = rng.choice(_PARTIAL_CONFESSIONS)
+    else:
+        opener = rng.choice(_INTERVIEW_CONFESSION_OPENERS)
+        motive = truth.case_meta.get("motive_category")
+        motive_key = motive if isinstance(motive, str) else ""
+        confession_pool = _CONFESSIONS.get(motive_key) or _CONFESSIONS.get("default", [])
+        line = rng.choice(confession_pool) if confession_pool else rng.choice(_PARTIAL_CONFESSIONS)
+    return normalize_line(f"{opener} {line.format(suspect=suspect_name, victim=victim_name)}")
+
+
 def build_post_arrest_statement(
     rng: Rng,
     truth: TruthState,
@@ -114,7 +161,7 @@ def build_post_arrest_statement(
 ) -> list[str]:
     if board.hypothesis is None:
         return []
-    suspect_name, victim_name = _pick_name(truth, board)
+    suspect_name, victim_name = _pick_case_names(truth, board.hypothesis.suspect_id)
     motive = truth.case_meta.get("motive_category")
     motive_key = motive if isinstance(motive, str) else ""
     if not validation.is_correct_suspect or outcome == ArrestResult.FAILED:

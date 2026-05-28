@@ -53,3 +53,30 @@ def test_load_world_state_initializes_row_without_losing_existing_records(tmp_pa
     assert [record.case_id for record in state.case_history] == ["case_001"]
     assert state.people_index["person-1"].name == "Mina Vale"
     store.close()
+
+
+def test_world_store_persists_nemesis_dossier_entries(tmp_path) -> None:
+    path = tmp_path / "world.db"
+    store = WorldStore(path)
+    state = store.load_world_state()
+
+    state.update_nemesis_dossier(
+        "case_002",
+        signature_meta={
+            "token": "pressed flower",
+            "staging": "hidden",
+            "placement_hint": "just off the main sightline",
+        },
+        pattern_label="Pattern Worth Monitoring",
+        pattern_observations=["The scene detail looks intentional."],
+    )
+    store.save_world_state(state)
+
+    reloaded = store.load_world_state()
+
+    assert len(reloaded.campaign.dossier.entries) == 1
+    entry = reloaded.campaign.dossier.entries[0]
+    assert entry.case_id == "case_002"
+    assert entry.headline == "Pattern Worth Monitoring"
+    assert any("pressed flower" in note for note in entry.notes)
+    store.close()
