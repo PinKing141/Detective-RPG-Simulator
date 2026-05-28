@@ -1885,7 +1885,9 @@ def main() -> None:
             )
             if identity_notes:
                 debrief_notes.extend(identity_notes)
-            world.update_closing_in(pattern_type, profile_used, proof_met)
+            closing_notes = world.update_closing_in(pattern_type, profile_used, proof_met)
+            if closing_notes:
+                debrief_notes.extend(closing_notes)
             early = check_early_ending(world)
             if early:
                 delete_save(truth.case_id)
@@ -1896,7 +1898,9 @@ def main() -> None:
                 if world_store:
                     world_store.save_world_state(world)
                 break
-            world.advance_episode()
+            advance_notes = world.advance_episode()
+            if advance_notes:
+                debrief_notes.extend(advance_notes)
             case_index = world.campaign.episode_index
             world.ensure_case_queue()
             if world_store:

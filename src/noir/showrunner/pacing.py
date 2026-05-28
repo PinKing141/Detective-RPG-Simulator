@@ -43,7 +43,18 @@ def schedule_case_payload(
     last_outcome: str | None,
     *,
     endgame_ready: bool = False,
+    tension_bias: str | None = None,
 ) -> dict[str, str]:
+    """Build a case payload for a slot.
+
+    ``tension_bias`` is an optional hint from the tension wave layer:
+      - ``"need_raise"`` pushes toward intensity even when pressure is low.
+      - ``"need_breather"`` pushes toward character even when pressure is normal.
+
+    The bias never overrides the harder cooldown rules (post-failure or
+    high pressure) that protect the player from compounding fallout.
+    """
+
     beat = season_beat_for_episode(episode_index)
     archetype = beat.archetype
     reason = "tension_wave"
@@ -57,6 +68,14 @@ def schedule_case_payload(
         archetype = CaseArchetype.CHARACTER
         reason = "cooldown_pressure"
         beat_label = "cooldown"
+    elif tension_bias == "need_breather" and beat.season_episode > 1:
+        archetype = CaseArchetype.CHARACTER
+        reason = "tension_breather"
+        beat_label = "breather"
+    elif tension_bias == "need_raise" and archetype == CaseArchetype.CHARACTER:
+        archetype = CaseArchetype.PRESSURE
+        reason = "tension_push"
+        beat_label = "tension_push"
     elif (
         pressure <= 1
         and archetype == CaseArchetype.CHARACTER

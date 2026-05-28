@@ -1679,12 +1679,16 @@ class Phase05App(App):
         )
         if identity_notes:
             debrief_notes.extend(identity_notes)
-        self.world.update_closing_in(pattern_type, profile_used, proof_met)
+        closing_notes = self.world.update_closing_in(pattern_type, profile_used, proof_met)
+        if closing_notes:
+            debrief_notes.extend(closing_notes)
         early_ending = check_early_ending(self.world)
         if early_ending:
             self._show_ending(early_ending)
             return
-        self.world.advance_episode()
+        advance_notes = self.world.advance_episode()
+        if advance_notes:
+            debrief_notes.extend(advance_notes)
         self.case_index = self.world.campaign.episode_index
         self.season = self.world.campaign.season_index
         self.world.ensure_case_queue()
