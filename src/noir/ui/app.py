@@ -50,6 +50,10 @@ from noir.investigation.leads import (
     format_neighbor_lead,
 )
 from noir.investigation.operations import OperationTier, OperationType, WarrantType
+from noir.investigation.op_pipeline import (
+    HYPOTHESIS_REQUIRED_SUMMARY,
+    WARRANT_REQUIRED_FOR_RAID,
+)
 from noir.investigation.outcomes import TRUST_LIMIT, resolve_case_outcome
 from noir.investigation.results import ActionOutcome, InvestigationState, LocationState
 from noir.locations.profiles import ScenePOI
@@ -71,13 +75,19 @@ from noir.narrative.recaps import (
 from noir.narrative.endings import build_final_ending, check_early_ending
 from noir.ui.text import (
     HeaderSnapshot,
+    NO_ACTIONS_YET,
+    NO_WORLD_NOTES,
+    POST_ARREST_TITLE,
     TAB_LABELS,
+    compose_debrief_case_block,
     compose_episode_banner,
     compose_episode_log_line,
     compose_header_line,
     compose_hypothesis_line,
     compose_intro_help_line,
+    compose_load_confirmation,
     compose_now_line,
+    compose_save_confirmation,
     compose_snapshot_block,
     tab_label,
 )
@@ -684,27 +694,33 @@ class Phase05App(App):
         elif self.active_tab == "summary":
             lines.append(tab_label("summary"))
             if payload and payload.get("key") == "case":
-                lines.append(f"Case: {self.truth.case_id}")
-                lines.append(f"District: {self.district}")
-                lines.append(f"Location: {self.location_name}")
                 scene_layout = self.case_facts.get("scene_layout")
+                scene_mode = None
                 if isinstance(scene_layout, dict):
-                    mode = scene_layout.get("mode")
-                    if mode:
-                        lines.append(f"Scene mode: {mode}")
-                if self.last_pattern_addendum:
-                    lines.append(f"Pattern: {self.last_pattern_addendum.label}")
+                    scene_mode = scene_layout.get("mode")
+                pattern_label = (
+                    self.last_pattern_addendum.label if self.last_pattern_addendum else None
+                )
+                lines.extend(
+                    compose_debrief_case_block(
+                        self.truth.case_id,
+                        self.district,
+                        self.location_name,
+                        scene_mode,
+                        pattern_label,
+                    )
+                )
             elif payload and payload.get("key") == "last_action":
                 last_result = result or self.last_result
                 if last_result is None:
-                    lines.append("(no actions yet)")
+                    lines.append(NO_ACTIONS_YET)
                 else:
-                    lines.append(f"Last action: {last_result.action}")
+                    lines.append(f"Last action {last_result.action}")
                     lines.append(last_result.summary)
                     for note in last_result.notes:
                         lines.append(f"- {note}")
             elif payload and payload.get("key") == "pattern":
-                lines.append("Pattern addendum")
+                lines.append(tab_label("pattern"))
                 if self.last_pattern_addendum:
                     lines.extend(self.last_pattern_addendum.render())
                 else:
@@ -714,10 +730,10 @@ class Phase05App(App):
                 if context_lines:
                     lines.extend(context_lines)
                 else:
-                    lines.append("(no world notes)")
+                    lines.append(NO_WORLD_NOTES)
             elif payload and payload.get("key") == "post_arrest":
                 if self.last_post_arrest_statement:
-                    lines.append(f"Post-arrest statement ({self.last_post_arrest_case_id})")
+                    lines.append(POST_ARREST_TITLE)
                     lines.extend(self.last_post_arrest_statement)
                 else:
                     lines.append("(none)")
@@ -1164,7 +1180,7 @@ class Phase05App(App):
             self.presentation,
             hypothesis=self.board.hypothesis,
         )
-        self._write(f"Investigation saved to {save_path}.")
+        self._write(compose_save_confirmation(str(save_path)))
         self._refresh_actions()
 
     def _load_investigation_snapshot(
@@ -1472,7 +1488,7 @@ class Phase05App(App):
             return
         if value == "13":
             if self.board.hypothesis is None:
-                self._write("Set a hypothesis before requesting a warrant.")
+                self._write(HYPOTHESIS_REQUIRED_SUMMARY[OperationType.WARRANT])
                 return
             self.prompt_state = PromptState(step="warrant_type", options=list(WarrantType))
             lines = ["Choose warrant type:"]
@@ -1486,7 +1502,7 @@ class Phase05App(App):
                 self._write("Endgame operations are not ready yet.")
                 return
             if self.board.hypothesis is None:
-                self._write("Set a hypothesis before running a stakeout.")
+                self._write(HYPOTHESIS_REQUIRED_SUMMARY[OperationType.STAKEOUT])
                 return
             self._start_operation_prompt(OperationType.STAKEOUT, "Stakeout evidence")
             return
@@ -1495,7 +1511,7 @@ class Phase05App(App):
                 self._write("Endgame operations are not ready yet.")
                 return
             if self.board.hypothesis is None:
-                self._write("Set a hypothesis before running bait.")
+                self._write(HYPOTHESIS_REQUIRED_SUMMARY[OperationType.BAIT])
                 return
             self._start_operation_prompt(OperationType.BAIT, "Bait evidence")
             return
@@ -1504,13 +1520,13 @@ class Phase05App(App):
                 self._write("Endgame operations are not ready yet.")
                 return
             if self.board.hypothesis is None:
-                self._write("Set a hypothesis before running a raid.")
+                self._write(HYPOTHESIS_REQUIRED_SUMMARY[OperationType.RAID])
                 return
             if not (
                 WarrantType.ARREST.value in self.state.warrant_grants
                 or WarrantType.SEARCH.value in self.state.warrant_grants
             ):
-                self._write("Raid requires an arrest or search warrant.")
+                self._write(WARRANT_REQUIRED_FOR_RAID)
                 return
             self._start_operation_prompt(OperationType.RAID, "Raid evidence")
             return

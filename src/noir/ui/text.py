@@ -160,3 +160,41 @@ def compose_intro_help_line() -> str:
         "Tip: Enter on the Actions list to act. "
         "Tab cycles panes, G toggles gaze, ? for full help, q to quit."
     )
+
+
+def compose_debrief_case_block(
+    case_id: str,
+    district: str,
+    location: str,
+    scene_mode: str | None = None,
+    pattern_label: str | None = None,
+) -> list[str]:
+    """Detail-pane summary block. Same label/value style as the snapshot."""
+
+    lines = [
+        f"Case {case_id}",
+        f"District {district}",
+        f"Location {location}",
+    ]
+    if scene_mode:
+        lines.append(f"Scene mode {scene_mode}")
+    if pattern_label:
+        lines.append(f"Pattern {pattern_label}")
+    return lines
+
+
+def compose_save_confirmation(path: str) -> str:
+    return f"Investigation saved to {path}."
+
+
+def compose_load_confirmation(case_id: str) -> str:
+    return f"Investigation loaded for {case_id}."
+
+
+def compose_save_prompt(case_id: str) -> str:
+    return f"Saved investigation found for {case_id}. Load it? [Y/n] "
+
+
+POST_ARREST_TITLE = "Post-arrest statement"
+NO_ACTIONS_YET = "(no actions yet)"
+NO_WORLD_NOTES = "(no world notes)"

@@ -7,15 +7,28 @@ the CLI both rely on. Pure-function tests — no UI standup required.
 from __future__ import annotations
 
 from noir.narrative.gaze import GazeMode
+from noir.investigation.op_pipeline import (
+    EVIDENCE_REQUIRED_SUMMARY,
+    HYPOTHESIS_REQUIRED_SUMMARY,
+    WARRANT_REQUIRED_FOR_RAID,
+)
+from noir.investigation.operations import OperationType
 from noir.ui.text import (
     HeaderSnapshot,
+    NO_ACTIONS_YET,
+    NO_WORLD_NOTES,
+    POST_ARREST_TITLE,
     TAB_LABELS,
+    compose_debrief_case_block,
     compose_episode_banner,
     compose_episode_log_line,
     compose_header_line,
     compose_hypothesis_line,
     compose_intro_help_line,
+    compose_load_confirmation,
     compose_now_line,
+    compose_save_confirmation,
+    compose_save_prompt,
     compose_snapshot_block,
     tab_label,
 )
@@ -200,3 +213,101 @@ def test_intro_help_line_is_a_single_compact_sentence() -> None:
     line = compose_intro_help_line()
     assert "\n" not in line
     assert "q to quit" in line
+
+
+# ---------------------------------------------------------------------------
+# Debrief case block matches the snapshot style (no colons)
+# ---------------------------------------------------------------------------
+
+
+def test_debrief_case_block_uses_bare_label_value_style() -> None:
+    block = compose_debrief_case_block(
+        "23-014",
+        "harbor",
+        "Dock Office",
+        scene_mode="interior",
+        pattern_label="Burned bridge",
+    )
+
+    assert block == [
+        "Case 23-014",
+        "District harbor",
+        "Location Dock Office",
+        "Scene mode interior",
+        "Pattern Burned bridge",
+    ]
+    for line in block:
+        assert ":" not in line
+
+
+def test_debrief_case_block_skips_optional_fields_when_empty() -> None:
+    block = compose_debrief_case_block("23-014", "harbor", "Dock Office")
+
+    assert block == [
+        "Case 23-014",
+        "District harbor",
+        "Location Dock Office",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Save / load wording: one canonical form everywhere
+# ---------------------------------------------------------------------------
+
+
+def test_save_confirmation_uses_canonical_form() -> None:
+    assert compose_save_confirmation("/tmp/save.json") == (
+        "Investigation saved to /tmp/save.json."
+    )
+
+
+def test_load_confirmation_uses_canonical_form() -> None:
+    assert compose_load_confirmation("23-014") == (
+        "Investigation loaded for 23-014."
+    )
+
+
+def test_save_prompt_uses_canonical_form() -> None:
+    prompt = compose_save_prompt("23-014")
+    assert prompt.startswith("Saved investigation found for 23-014.")
+    assert prompt.endswith("[Y/n] ")
+
+
+# ---------------------------------------------------------------------------
+# Constants used by detail panes
+# ---------------------------------------------------------------------------
+
+
+def test_post_arrest_title_has_no_case_id() -> None:
+    # The title must not embed any technical identifier.
+    assert POST_ARREST_TITLE == "Post-arrest statement"
+    assert "(" not in POST_ARREST_TITLE
+
+
+def test_placeholder_strings_are_parenthesised_one_liners() -> None:
+    assert NO_ACTIONS_YET.startswith("(") and NO_ACTIONS_YET.endswith(")")
+    assert NO_WORLD_NOTES.startswith("(") and NO_WORLD_NOTES.endswith(")")
+
+
+# ---------------------------------------------------------------------------
+# Drift canary: every operation type has both gate-strings in the pipeline
+# ---------------------------------------------------------------------------
+
+
+def test_every_operation_type_has_a_hypothesis_required_summary() -> None:
+    for op_type in OperationType:
+        message = HYPOTHESIS_REQUIRED_SUMMARY[op_type]
+        assert message.startswith("Set a hypothesis before ")
+        assert message.endswith(".")
+
+
+def test_every_operation_type_has_an_evidence_required_summary() -> None:
+    for op_type in OperationType:
+        message = EVIDENCE_REQUIRED_SUMMARY[op_type]
+        assert message.startswith("Select supporting evidence before ")
+        assert message.endswith(".")
+
+
+def test_warrant_required_for_raid_message_is_a_single_sentence() -> None:
+    assert "\n" not in WARRANT_REQUIRED_FOR_RAID
+    assert WARRANT_REQUIRED_FOR_RAID.endswith(".")

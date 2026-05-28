@@ -185,7 +185,7 @@ def trigger(request: OperationRequest, ctx: OperationContext) -> TriggerResult:
         return base
 
     if profile.requires_warrant and not _has_actionable_warrant(ctx.state):
-        base.summary = "Raid requires an arrest or search warrant."
+        base.summary = WARRANT_REQUIRED_FOR_RAID
         return base
 
     if not request.evidence_ids:
@@ -396,21 +396,26 @@ def _has_actionable_warrant(state: InvestigationState) -> bool:
     )
 
 
+HYPOTHESIS_REQUIRED_SUMMARY: dict[OperationType, str] = {
+    OperationType.WARRANT: "Set a hypothesis before requesting a warrant.",
+    OperationType.STAKEOUT: "Set a hypothesis before running a stakeout.",
+    OperationType.BAIT: "Set a hypothesis before running a bait operation.",
+    OperationType.RAID: "Set a hypothesis before running a raid.",
+}
+
+EVIDENCE_REQUIRED_SUMMARY: dict[OperationType, str] = {
+    OperationType.WARRANT: "Select supporting evidence before requesting a warrant.",
+    OperationType.STAKEOUT: "Select supporting evidence before running a stakeout.",
+    OperationType.BAIT: "Select supporting evidence before running bait.",
+    OperationType.RAID: "Select supporting evidence before running a raid.",
+}
+
+WARRANT_REQUIRED_FOR_RAID = "Raid requires an arrest or search warrant."
+
+
 def _hypothesis_required_summary(op_type: OperationType) -> str:
-    if op_type == OperationType.WARRANT:
-        return "Set a hypothesis before requesting a warrant."
-    if op_type == OperationType.STAKEOUT:
-        return "Set a hypothesis before running a stakeout."
-    if op_type == OperationType.BAIT:
-        return "Set a hypothesis before running a bait operation."
-    return "Set a hypothesis before running a raid."
+    return HYPOTHESIS_REQUIRED_SUMMARY[op_type]
 
 
 def _evidence_required_summary(op_type: OperationType) -> str:
-    if op_type == OperationType.STAKEOUT:
-        return "Select supporting evidence before running a stakeout."
-    if op_type == OperationType.BAIT:
-        return "Select supporting evidence before running bait."
-    if op_type == OperationType.RAID:
-        return "Select supporting evidence before running a raid."
-    return "Select supporting evidence before requesting a warrant."
+    return EVIDENCE_REQUIRED_SUMMARY[op_type]
