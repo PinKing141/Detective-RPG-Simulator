@@ -69,6 +69,18 @@ from noir.narrative.recaps import (
     build_previously_on,
 )
 from noir.narrative.endings import build_final_ending, check_early_ending
+from noir.ui.text import (
+    HeaderSnapshot,
+    TAB_LABELS,
+    compose_episode_banner,
+    compose_episode_log_line,
+    compose_header_line,
+    compose_hypothesis_line,
+    compose_intro_help_line,
+    compose_now_line,
+    compose_snapshot_block,
+    tab_label,
+)
 from noir.narrative.debriefs import build_post_arrest_statement
 from noir.nemesis import (
     PatternTracker,
@@ -274,14 +286,7 @@ class Phase05App(App):
         self._pending_intro: list[str] = []
         self._has_mounted = False
         self._exit_armed_until = 0.0
-        self._tab_order = [
-            ("evidence", "Case File"),
-            ("leads", "Leads"),
-            ("pois", "Scene"),
-            ("profile", "Profile"),
-            ("pattern", "Pattern"),
-            ("summary", "Debrief"),
-        ]
+        self._tab_order = [(key, tab_label(key)) for key in TAB_LABELS]
         self.active_tab = "evidence"
         self.view_mode = "briefing"
         self.season = self.world.campaign.season_index
@@ -339,8 +344,8 @@ class Phase05App(App):
             for line in self._pending_briefing:
                 self._write(line)
             self._pending_briefing = []
-        self._write("Use the Actions list (Enter) or press I/F8 to type a number (1-18). Type 'q' to quit.")
-        self._write("Focus: A actions, L list, D detail, W wire, I input (Tab cycles). G toggles gaze.")
+        if self.case_index == 1:
+            self._write(compose_intro_help_line())
         if self.view_mode == "case_file":
             self.query_one("#actions", ListView).focus()
 
@@ -507,25 +512,20 @@ class Phase05App(App):
         banner = self.query_one("#briefing_banner", Static)
         title = self.query_one("#briefing_title", Static)
         body = self.query_one("#briefing_body", Static)
-        title.update(self.briefing_title or "Briefing")
-        banner_text = "EPISODE"
-        if self.episode_code and self.episode_title:
-            banner_text = f"EPISODE: {self.episode_code} — {self.episode_title}"
-        elif self.episode_title:
-            banner_text = f"EPISODE: {self.episode_title}"
-        rule_len = max(28, len(banner_text) + 8)
-        rule = "-" * rule_len
-        banner.update(f"{rule}\n{banner_text}\n{rule}")
+        title.update(self.briefing_title or "BRIEFING")
+        banner.update(compose_episode_banner(self.episode_code, self.episode_title))
         snapshot = self.query_one("#briefing_snapshot", Static)
         leads_box = self.query_one("#briefing_leads", Static)
-        snapshot_lines = [
-            "Case snapshot",
-            f"District: {self.district}",
-            f"Location: {self.location_name}",
-            f"Pressure: {self.state.pressure}/{PRESSURE_LIMIT}",
-            f"Trust: {self.state.trust}/{TRUST_LIMIT}",
-        ]
-        snapshot.update("\n".join(snapshot_lines))
+        snapshot.update(
+            "\n".join(
+                compose_snapshot_block(
+                    self.district,
+                    self.location_name,
+                    self.state.pressure,
+                    self.state.trust,
+                )
+            )
+        )
         lead_lines = ["Key leads"]
         lead_count = 0
         for lead in self.state.leads:
@@ -536,10 +536,28 @@ class Phase05App(App):
         if lead_count == 0:
             lead_lines.append("(none)")
         leads_box.update("\n".join(lead_lines))
+        now_line = self._compose_now_line()
+        body_lines = [now_line, ""] if now_line else []
         if self.briefing_lines:
-            body.update("\n".join(self.briefing_lines))
+            body_lines.extend(self.briefing_lines)
         else:
-            body.update("(no briefing available)")
+            body_lines.append("(no briefing available)")
+        body.update("\n".join(body_lines))
+
+    def _compose_now_line(self) -> str:
+        arc = self.world.campaign.nemesis_arc
+        return compose_now_line(
+            pressure=self.state.pressure,
+            trust=self.state.trust,
+            tension=self.world.campaign.tension.value,
+            nemesis_clock=arc.clock,
+            nemesis_clock_max=arc.clock_max,
+            nemesis_confronted=arc.confronted,
+            endgame_ready=self.world.endgame_ready(),
+            pending_lead_count=sum(
+                1 for lead in self.state.leads if lead.status == LeadStatus.ACTIVE
+            ),
+        )
 
     def _set_prompt_active(self, active: bool) -> None:
         command = self.query_one("#command", Input)
@@ -568,29 +586,27 @@ class Phase05App(App):
         state = self.state
         if state is None:
             return
-        parts = [f"Case: {self.truth.case_id}"]
-        if self.episode_code:
-            parts.append(self.episode_code)
-        parts.extend(
-            [
-                f"Investigation Time {state.time}/{TIME_LIMIT}",
-                f"Pressure {state.pressure}/{PRESSURE_LIMIT}",
-                f"Trust {state.trust}/{TRUST_LIMIT}",
-                f"Gaze {gaze_label(self.gaze_mode)} (G: toggle)",
-            ]
+        snap = HeaderSnapshot(
+            case_id=self.truth.case_id,
+            episode_code=self.episode_code,
+            episode_title=self.episode_title,
+            time=state.time,
+            pressure=state.pressure,
+            trust=state.trust,
+            gaze_mode=self.gaze_mode,
         )
-        lines = ["  ".join(parts), self._hypothesis_summary_line()]
+        lines = [compose_header_line(snap), self._hypothesis_summary_line()]
         header.update("\n".join(lines))
 
     def _hypothesis_summary_line(self) -> str:
         if self.board.hypothesis is None:
-            return "Hypothesis: (none)"
+            return compose_hypothesis_line(None, [], 0)
         suspect = self.truth.people.get(self.board.hypothesis.suspect_id)
         suspect_name = suspect.name if suspect else "Unknown"
-        claims = ", ".join(self._format_claim(claim) for claim in self.board.hypothesis.claims)
-        evd_count = len(self.board.hypothesis.evidence_ids)
-        claim_text = claims or "(none)"
-        return f"Hypothesis: {suspect_name} | Claims: {claim_text} | Evd: {evd_count}"
+        claim_labels = [self._format_claim(claim) for claim in self.board.hypothesis.claims]
+        return compose_hypothesis_line(
+            suspect_name, claim_labels, len(self.board.hypothesis.evidence_ids)
+        )
 
     def _refresh_detail(self, result) -> None:
         detail = self.query_one("#detail_view", Static)
@@ -610,7 +626,7 @@ class Phase05App(App):
             index = min(self._selected_case_index, len(self._case_payloads) - 1)
             payload = self._case_payloads[index]
         if self.active_tab == "evidence":
-            lines.append("Evidence detail")
+            lines.append(tab_label("evidence"))
             if payload and payload.get("type") == "evidence":
                 evidence_id = payload.get("id")
                 item = next(
@@ -627,7 +643,7 @@ class Phase05App(App):
             else:
                 lines.append("No evidence selected.")
         elif self.active_tab == "leads":
-            lines.append("Lead detail")
+            lines.append(tab_label("leads"))
             if payload and payload.get("type") == "lead":
                 lead = payload.get("lead")
                 status = lead.status.value if lead else "unknown"
@@ -642,7 +658,7 @@ class Phase05App(App):
             else:
                 lines.append("No lead selected.")
         elif self.active_tab == "pois":
-            lines.append("Scene detail")
+            lines.append(tab_label("pois"))
             if payload and payload.get("type") == "poi":
                 poi = payload.get("poi")
                 status = "visited" if poi.poi_id in self.state.visited_poi_ids else "unvisited"
@@ -656,7 +672,7 @@ class Phase05App(App):
         elif self.active_tab == "profile":
             lines.extend(self._build_profile_tab_lines())
         elif self.active_tab == "pattern":
-            lines.append("Pattern addendum")
+            lines.append(tab_label("pattern"))
             if payload and payload.get("type") == "pattern":
                 addendum = payload.get("addendum")
                 if addendum:
@@ -666,7 +682,7 @@ class Phase05App(App):
             else:
                 lines.append("(none)")
         elif self.active_tab == "summary":
-            lines.append("Debrief")
+            lines.append(tab_label("summary"))
             if payload and payload.get("key") == "case":
                 lines.append(f"Case: {self.truth.case_id}")
                 lines.append(f"District: {self.district}")
@@ -867,7 +883,9 @@ class Phase05App(App):
         self._suppress_list_events = False
 
     def _format_evidence(self, index: int, item) -> str:
-        return f"{index}) {item.summary} ({item.evidence_type}, {item.confidence})"
+        type_value = getattr(item.evidence_type, "value", str(item.evidence_type))
+        type_label = type_value.replace("_", " ").title()
+        return f"{index}) {item.summary} ({type_label}, {self._format_confidence(item.confidence)})"
 
     def _format_evidence_detail(self, index: int, item) -> list[str]:
         if isinstance(item, WitnessStatement):
@@ -1788,11 +1806,11 @@ class Phase05App(App):
         )
         self.episode_code = f"S{self.season}E{case_index}"
         self.episode_title = episode_title
-        intro_lines.append(f"Episode: {self.episode_code} - {episode_title}")
+        intro_lines.append(compose_episode_log_line(self.episode_code, episode_title))
         intro_lines.extend(build_cold_open(episode_rng, self.location_name))
         intro_lines.extend(build_partner_line(episode_rng))
         intro_lines = dedupe_lines(intro_lines)
-        briefing_lines = [line for line in intro_lines if not line.startswith("Episode:")]
+        briefing_lines = [line for line in intro_lines if not line.startswith("Episode ")]
         if intro_lines:
             if self._has_mounted:
                 for line in intro_lines:
