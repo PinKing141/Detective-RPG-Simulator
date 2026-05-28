@@ -2351,6 +2351,7 @@ class Phase05App(App):
                 self.location_id,
                 data["warrant_type"],
                 evidence_ids,
+                world=self.world,
             )
             self._apply_action_result(result)
             return
@@ -2371,6 +2372,7 @@ class Phase05App(App):
                     self.board,
                     self.location_id,
                     evidence_ids,
+                    world=self.world,
                 )
             elif op_type == OperationType.BAIT:
                 result = bait(
@@ -2380,6 +2382,7 @@ class Phase05App(App):
                     self.board,
                     self.location_id,
                     evidence_ids,
+                    world=self.world,
                 )
             elif op_type == OperationType.RAID:
                 result = raid(
@@ -2389,6 +2392,7 @@ class Phase05App(App):
                     self.board,
                     self.location_id,
                     evidence_ids,
+                    world=self.world,
                 )
             else:
                 self._write("Operation unavailable.")

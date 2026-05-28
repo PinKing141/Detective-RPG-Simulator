@@ -1577,6 +1577,7 @@ def main() -> None:
                 location_id,
                 warrant_type,
                 evidence_ids,
+                world=world,
             )
         elif choice == "14":
             if not endgame_ready:
@@ -1599,6 +1600,7 @@ def main() -> None:
                 board,
                 location_id,
                 evidence_ids,
+                world=world,
             )
         elif choice == "15":
             if not endgame_ready:
@@ -1621,6 +1623,7 @@ def main() -> None:
                 board,
                 location_id,
                 evidence_ids,
+                world=world,
             )
         elif choice == "16":
             if not endgame_ready:
@@ -1646,6 +1649,7 @@ def main() -> None:
                 board,
                 location_id,
                 evidence_ids,
+                world=world,
             )
         elif choice == "17":
             save_path = save_investigation(
