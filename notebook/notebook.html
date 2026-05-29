@@ -45,6 +45,15 @@
     pointer-events: none;
     transform: scale(1.04);
   }
+  /* Once the opener is gone, kill its animations so the GPU stops
+     compositing scanlines/noise/tracking under the notebook. */
+  .tv-stage.off .screen-bg,
+  .tv-stage.off .noise,
+  .tv-stage.off .tracking-band,
+  .tv-stage.off .screen-content,
+  .tv-stage.off .scanlines,
+  .tv-stage.off .chroma { animation: none !important; }
+  .tv-stage.hidden { display: none !important; }
 
   /* Wood console under the TV */
   .console-shelf {
@@ -362,11 +371,6 @@
     margin-left: -700px;
     background: radial-gradient(circle, rgba(255,210,140,0.22) 0%, rgba(255,180,90,0.08) 30%, transparent 60%);
     pointer-events: none; z-index: 1;
-    animation: lampFlicker 4s ease-in-out infinite;
-  }
-  @keyframes lampFlicker {
-    0%,100% { opacity: 1; }
-    45% { opacity: 0.92; } 47% { opacity: 1; } 49% { opacity: 0.88; } 51% { opacity: 1; }
   }
   .mote {
     position: fixed; width: 3px; height: 3px;
@@ -1034,6 +1038,9 @@
       $('controls').style.display = 'flex';
       updateBook();
     }, 950);
+    // After the fade-out transition (1.2s) finishes, fully remove the TV so
+    // none of its animations (noise, scanlines, tracking) keep running.
+    setTimeout(() => { $('tvStage').classList.add('hidden'); }, 2300);
   });
 
   // ---- Dust motes ----
@@ -1045,8 +1052,8 @@
     document.body.appendChild(m);
     setTimeout(() => m.remove(), 30000);
   }
-  setInterval(spawnMote, 700);
-  for (let i = 0; i < 10; i++) setTimeout(spawnMote, i * 200);
+  setInterval(spawnMote, 1600);
+  for (let i = 0; i < 5; i++) setTimeout(spawnMote, i * 400);
 
   // ---- Public hook for Qt to call once data is ready ----
   window.__hydrate = function(payload) {
