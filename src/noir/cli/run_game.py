@@ -8,7 +8,13 @@ ROOT = Path(__file__).resolve().parents[1]
 from noir import config
 from noir.cases.archetypes import CaseArchetype
 from noir.cases.truth_generator import generate_case
-from noir.cli.support import maybe_print_investigation_guidance
+from noir.cli.support import dialog_role_key_for_witness, maybe_print_investigation_guidance
+from noir.investigation.op_pipeline import (
+    EVIDENCE_REQUIRED_SUMMARY,
+    HYPOTHESIS_REQUIRED_SUMMARY,
+    WARRANT_REQUIRED_FOR_RAID,
+)
+from noir.ui.text import compose_save_confirmation, compose_save_prompt
 from noir.deduction.board import ClaimType, DeductionBoard, Hypothesis, ReasoningStep
 from noir.deduction.scoring import (
     auto_build_reasoning_steps,
@@ -1175,7 +1181,7 @@ def main() -> None:
     )
     if has_save(truth.case_id):
         load_choice = input(
-            f"Saved investigation found for {truth.case_id}. Load it? [Y/n] "
+            compose_save_prompt(truth.case_id)
         ).strip().lower()
         if load_choice not in {"n", "no"}:
             state, presentation, board, load_note = _restore_investigation_snapshot(
@@ -1545,7 +1551,7 @@ def main() -> None:
             result = tech_sweep(truth, presentation, state, location_id)
         elif choice == "13":
             if board.hypothesis is None:
-                print("Set a hypothesis before requesting a warrant.")
+                print(HYPOTHESIS_REQUIRED_SUMMARY[OperationType.WARRANT])
                 continue
             warrant_type = _choose_warrant_type()
             if warrant_type is None:
@@ -1556,7 +1562,7 @@ def main() -> None:
                 truth, presentation, state, board.known_evidence_ids, gaze_mode
             )
             if not evidence_ids:
-                print("Select supporting evidence before requesting a warrant.")
+                print(EVIDENCE_REQUIRED_SUMMARY[OperationType.WARRANT])
                 continue
             result = request_warrant(
                 truth,
@@ -1566,20 +1572,21 @@ def main() -> None:
                 location_id,
                 warrant_type,
                 evidence_ids,
+                world=world,
             )
         elif choice == "14":
             if not endgame_ready:
                 print("Stakeout is not available yet.")
                 continue
             if board.hypothesis is None:
-                print("Set a hypothesis before running a stakeout.")
+                print(HYPOTHESIS_REQUIRED_SUMMARY[OperationType.STAKEOUT])
                 continue
             board.sync_from_state(state)
             evidence_ids = _choose_evidence(
                 truth, presentation, state, board.known_evidence_ids, gaze_mode
             )
             if not evidence_ids:
-                print("Select supporting evidence before running a stakeout.")
+                print(EVIDENCE_REQUIRED_SUMMARY[OperationType.STAKEOUT])
                 continue
             result = stakeout(
                 truth,
@@ -1588,20 +1595,21 @@ def main() -> None:
                 board,
                 location_id,
                 evidence_ids,
+                world=world,
             )
         elif choice == "15":
             if not endgame_ready:
                 print("Bait operation is not available yet.")
                 continue
             if board.hypothesis is None:
-                print("Set a hypothesis before running a bait operation.")
+                print(HYPOTHESIS_REQUIRED_SUMMARY[OperationType.BAIT])
                 continue
             board.sync_from_state(state)
             evidence_ids = _choose_evidence(
                 truth, presentation, state, board.known_evidence_ids, gaze_mode
             )
             if not evidence_ids:
-                print("Select supporting evidence before running bait.")
+                print(EVIDENCE_REQUIRED_SUMMARY[OperationType.BAIT])
                 continue
             result = bait(
                 truth,
@@ -1610,23 +1618,24 @@ def main() -> None:
                 board,
                 location_id,
                 evidence_ids,
+                world=world,
             )
         elif choice == "16":
             if not endgame_ready:
                 print("Raid is not available yet.")
                 continue
             if board.hypothesis is None:
-                print("Set a hypothesis before running a raid.")
+                print(HYPOTHESIS_REQUIRED_SUMMARY[OperationType.RAID])
                 continue
             if not has_warrant:
-                print("Raid requires an arrest or search warrant.")
+                print(WARRANT_REQUIRED_FOR_RAID)
                 continue
             board.sync_from_state(state)
             evidence_ids = _choose_evidence(
                 truth, presentation, state, board.known_evidence_ids, gaze_mode
             )
             if not evidence_ids:
-                print("Select supporting evidence before running a raid.")
+                print(EVIDENCE_REQUIRED_SUMMARY[OperationType.RAID])
                 continue
             result = raid(
                 truth,
@@ -1635,6 +1644,7 @@ def main() -> None:
                 board,
                 location_id,
                 evidence_ids,
+                world=world,
             )
         elif choice == "17":
             save_path = save_investigation(
@@ -1644,7 +1654,7 @@ def main() -> None:
                 presentation,
                 hypothesis=board.hypothesis,
             )
-            print(f"Saved investigation to {save_path}.")
+            print(compose_save_confirmation(str(save_path)))
             continue
         elif choice == "18":
             if not has_save(truth.case_id):
@@ -1887,7 +1897,9 @@ def main() -> None:
             )
             if identity_notes:
                 debrief_notes.extend(identity_notes)
-            world.update_closing_in(pattern_type, profile_used, proof_met)
+            closing_notes = world.update_closing_in(pattern_type, profile_used, proof_met)
+            if closing_notes:
+                debrief_notes.extend(closing_notes)
             dossier_updated = world.update_nemesis_dossier(
                 truth.case_id,
                 signature_meta=(
@@ -1919,7 +1931,9 @@ def main() -> None:
                 if world_store:
                     world_store.save_world_state(world)
                 break
-            world.advance_episode()
+            advance_notes = world.advance_episode()
+            if advance_notes:
+                debrief_notes.extend(advance_notes)
             case_index = world.campaign.episode_index
             world.ensure_case_queue()
             if world_store:
@@ -1945,7 +1959,7 @@ def main() -> None:
             )
             if has_save(truth.case_id):
                 load_choice = input(
-                    f"Saved investigation found for {truth.case_id}. Load it? [Y/n] "
+                    compose_save_prompt(truth.case_id)
                 ).strip().lower()
                 if load_choice not in {"n", "no"}:
                     state, presentation, board, load_note = _restore_investigation_snapshot(

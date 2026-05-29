@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from noir.showrunner.pacing import SEASON_EPISODE_COUNT, schedule_case_payload
+from noir.showrunner.seasons import mainline_beat_for, theme_for_season
+from noir.showrunner.tension import recommend_archetype_bias
 
 if TYPE_CHECKING:
     from noir.world.state import CampaignState, CaseRecord
@@ -25,13 +27,25 @@ def ensure_case_queue(
         season_index = campaign.season_index + season_offset
         season_episode = ((absolute_episode - 1) % SEASON_EPISODE_COUNT) + 1
         last_outcome = case_history[-1].outcome if case_history else None
+        bias = recommend_archetype_bias(campaign, season_episode)
         payload = schedule_case_payload(
             season_episode,
             pressure,
             last_outcome,
             endgame_ready=endgame_ready,
+            tension_bias=bias,
         )
         payload["season"] = str(season_index)
+        theme = theme_for_season(season_index)
+        payload["season_theme"] = theme.slug
+        beat = mainline_beat_for(season_index, season_episode)
+        if beat is not None and beat.label not in campaign.season_beats_completed:
+            payload["archetype"] = beat.archetype.value
+            payload["beat"] = beat.label
+            payload["reason"] = "mainline_beat"
+            payload["mainline"] = "true"
+        else:
+            payload["mainline"] = "false"
         campaign.case_queue.append(payload)
 
 
@@ -52,7 +66,12 @@ def pop_next_case(
         )
     if not campaign.case_queue:
         return None
-    return campaign.case_queue.pop(0)
+    payload = campaign.case_queue.pop(0)
+    if payload.get("mainline") == "true":
+        beat_label = payload.get("beat", "")
+        if beat_label and beat_label not in campaign.season_beats_completed:
+            campaign.season_beats_completed.append(beat_label)
+    return payload
 
 
 def advance_episode(campaign: "CampaignState") -> None:
@@ -61,5 +80,9 @@ def advance_episode(campaign: "CampaignState") -> None:
         campaign.season_index += 1
         campaign.episode_index = 1
         campaign.case_queue.clear()
+        campaign.season_beats_completed.clear()
+        campaign.season_theme = theme_for_season(campaign.season_index).slug
         return
     campaign.episode_index = next_episode
+    if not campaign.season_theme:
+        campaign.season_theme = theme_for_season(campaign.season_index).slug

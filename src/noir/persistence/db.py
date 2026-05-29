@@ -11,6 +11,10 @@ from noir.world.state import (
     CaseRecord,
     DistrictStatus,
     EpisodeTitleState,
+    EscalationThread,
+    LocationReputationRecord,
+    MistakeRecord,
+    NPCMemoryRecord,
     PersonRecord,
     WorldState,
 )
@@ -45,17 +49,17 @@ class WorldStore:
 
     def load_world_state(self) -> WorldState:
         cur = self.conn.cursor()
-        cur.execute("SELECT trust_level, pressure_level, tick, nemesis_exposure FROM world_state WHERE id = 1")
+        cur.execute("SELECT trust_level, pressure_level, tick, nemesis_exposure, memory_json FROM world_state WHERE id = 1")
         row = cur.fetchone()
         if row is None:
             state = WorldState()
             cur.execute(
                 """
-                INSERT INTO world_state (id, trust_level, pressure_level, tick, nemesis_exposure)
-                VALUES (1, ?, ?, ?, ?)
+                INSERT INTO world_state (id, trust_level, pressure_level, tick, nemesis_exposure, memory_json)
+                VALUES (1, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO NOTHING
                 """,
-                (state.trust, state.pressure, state.tick, state.nemesis_exposure),
+                (state.trust, state.pressure, state.tick, state.nemesis_exposure, "{}"),
             )
             self.conn.commit()
         else:
@@ -65,6 +69,37 @@ class WorldStore:
                 tick=int(row["tick"]),
                 nemesis_exposure=int(row["nemesis_exposure"]),
             )
+            memory_payload = json.loads(row["memory_json"] or "{}")
+            for person_id, payload in (memory_payload.get("npc_memory", {}) or {}).items():
+                state.npc_memory[person_id] = NPCMemoryRecord(
+                    person_id=person_id,
+                    last_tone=payload.get("last_tone", "neutral"),
+                    impact=payload.get("impact", "neutral"),
+                    promise_integrity=payload.get("promise_integrity", "unknown"),
+                    exposure_events=list(payload.get("exposure_events", []) or []),
+                    last_case_id=payload.get("last_case_id", ""),
+                )
+            for location_name, payload in (memory_payload.get("location_reputation", {}) or {}).items():
+                state.location_reputation[location_name] = LocationReputationRecord(
+                    location_name=location_name,
+                    trust_trend=int(payload.get("trust_trend", 0)),
+                    friction=int(payload.get("friction", 0)),
+                    safety_noise=int(payload.get("safety_noise", 0)),
+                    heat=int(payload.get("heat", 0)),
+                )
+            for key, payload in (memory_payload.get("mistake_history", {}) or {}).items():
+                state.mistake_history[key] = MistakeRecord(
+                    key=key,
+                    count=int(payload.get("count", 0)),
+                    last_case_id=payload.get("last_case_id", ""),
+                )
+            for key, payload in (memory_payload.get("unresolved_threads", {}) or {}).items():
+                state.unresolved_threads[key] = EscalationThread(
+                    key=key,
+                    severity=int(payload.get("severity", 1)),
+                    timer=int(payload.get("timer", 0)),
+                    mutation=payload.get("mutation", "dormant"),
+                )
         cur.execute("SELECT state_json FROM nemesis_state WHERE id = 1")
         row = cur.fetchone()
         if row is not None and row["state_json"]:
@@ -144,6 +179,44 @@ class WorldStore:
         nemesis_exposure = (
             state.nemesis_state.exposure if state.nemesis_state else state.nemesis_exposure
         )
+        memory_json = json.dumps(
+            {
+                "npc_memory": {
+                    key: {
+                        "last_tone": record.last_tone,
+                        "impact": record.impact,
+                        "promise_integrity": record.promise_integrity,
+                        "exposure_events": list(record.exposure_events),
+                        "last_case_id": record.last_case_id,
+                    }
+                    for key, record in state.npc_memory.items()
+                },
+                "location_reputation": {
+                    key: {
+                        "trust_trend": record.trust_trend,
+                        "friction": record.friction,
+                        "safety_noise": record.safety_noise,
+                        "heat": record.heat,
+                    }
+                    for key, record in state.location_reputation.items()
+                },
+                "mistake_history": {
+                    key: {
+                        "count": record.count,
+                        "last_case_id": record.last_case_id,
+                    }
+                    for key, record in state.mistake_history.items()
+                },
+                "unresolved_threads": {
+                    key: {
+                        "severity": record.severity,
+                        "timer": record.timer,
+                        "mutation": record.mutation,
+                    }
+                    for key, record in state.unresolved_threads.items()
+                },
+            }
+        )
         if self._has_nemesis_activity:
             cur.execute(
                 """
@@ -153,15 +226,17 @@ class WorldStore:
                     pressure_level,
                     tick,
                     nemesis_exposure,
-                    nemesis_activity
+                    nemesis_activity,
+                    memory_json
                 )
-                VALUES (1, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     trust_level = excluded.trust_level,
                     pressure_level = excluded.pressure_level,
                     tick = excluded.tick,
                     nemesis_exposure = excluded.nemesis_exposure,
-                    nemesis_activity = excluded.nemesis_activity
+                    nemesis_activity = excluded.nemesis_activity,
+                    memory_json = excluded.memory_json
                 """,
                 (
                     state.trust,
@@ -169,20 +244,22 @@ class WorldStore:
                     state.tick,
                     nemesis_exposure,
                     nemesis_exposure,
+                    memory_json,
                 ),
             )
         else:
             cur.execute(
                 """
-                INSERT INTO world_state (id, trust_level, pressure_level, tick, nemesis_exposure)
-                VALUES (1, ?, ?, ?, ?)
+                INSERT INTO world_state (id, trust_level, pressure_level, tick, nemesis_exposure, memory_json)
+                VALUES (1, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     trust_level = excluded.trust_level,
                     pressure_level = excluded.pressure_level,
                     tick = excluded.tick,
-                    nemesis_exposure = excluded.nemesis_exposure
+                    nemesis_exposure = excluded.nemesis_exposure,
+                    memory_json = excluded.memory_json
                 """,
-                (state.trust, state.pressure, state.tick, nemesis_exposure),
+                (state.trust, state.pressure, state.tick, nemesis_exposure, memory_json),
             )
         cur.execute(
             """
@@ -300,6 +377,7 @@ class WorldStore:
                 pressure_level INTEGER NOT NULL,
                 tick INTEGER NOT NULL,
                 nemesis_exposure INTEGER NOT NULL
+                ,memory_json TEXT NOT NULL DEFAULT '{}'
             )
             """
         )
@@ -314,6 +392,10 @@ class WorldStore:
                 cur.execute(
                     "UPDATE world_state SET nemesis_exposure = nemesis_activity"
                 )
+        if "memory_json" not in columns:
+            cur.execute(
+                "ALTER TABLE world_state ADD COLUMN memory_json TEXT NOT NULL DEFAULT '{}'"
+            )
         if self._has_nemesis_activity:
             cur.execute(
                 "UPDATE world_state SET nemesis_activity = 0 WHERE nemesis_activity IS NULL"

@@ -89,3 +89,28 @@ def test_nemesis_dossier_summarizes_visible_cross_case_file() -> None:
     assert any("tarot card left posed." in line for line in lines)
     assert any("Method lines logged" in line for line in lines)
     assert any("case_007: Recurring Detail" in line for line in lines)
+
+
+def test_world_memory_tracks_location_friction_and_thread_escalation() -> None:
+    world = WorldState()
+    world.register_unresolved_thread("dock-smuggling", timer=0)
+    world.apply_case_outcome(
+        CaseOutcome(
+            arrest_result=ArrestResult.FAILED,
+            trust_delta=-2,
+            pressure_delta=2,
+            notes=["Raid failed and target fled."],
+        ),
+        case_id="case_101",
+        seed=17,
+        district="harbor",
+        location_name="Dock Office",
+        started_tick=0,
+        ended_tick=4,
+    )
+
+    modifiers = world.case_start_modifiers("harbor", "Dock Office")
+
+    assert world.location_reputation["Dock Office"].friction >= 1
+    assert world.unresolved_threads["dock-smuggling"].severity >= 2
+    assert any("Unresolved thread 'dock-smuggling'" in line for line in modifiers.briefing_lines)

@@ -61,6 +61,11 @@ from noir.investigation.operations import (
     WarrantType,
     resolve_operation,
 )
+from noir.investigation.op_pipeline import (
+    OperationContext,
+    OperationRequest,
+    run_operation,
+)
 from noir.investigation.results import ActionOutcome, ActionResult, InvestigationState
 from noir.locations.profiles import load_location_profiles
 from noir.narrative.debriefs import build_interview_break_statement
@@ -83,7 +88,6 @@ from noir.investigation.action_support import (
     _apply_cooperation_decay,
     _apply_cost,
     _apply_failed_arrest_backlash,
-    _apply_operation_outcome,
     _dialog_relationship_profile,
     _dialog_role_key,
     _dialog_statement_from_graph,
@@ -1320,77 +1324,21 @@ def request_warrant(
     location_id: UUID,
     warrant_type: WarrantType,
     evidence_ids: list[UUID] | None = None,
+    world=None,
 ) -> ActionResult:
-    if board.hypothesis is None:
-        return ActionResult(
-            action=ActionType.REQUEST_WARRANT,
-            outcome=ActionOutcome.FAILURE,
-            summary="Set a hypothesis before requesting a warrant.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
-        state, ActionType.REQUEST_WARRANT
-    )
-    if blocked:
-        return ActionResult(
-            action=ActionType.REQUEST_WARRANT,
-            outcome=ActionOutcome.FAILURE,
-            summary=reason,
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    if evidence_ids is None:
+    if evidence_ids is None and board.hypothesis is not None:
         evidence_ids = list(board.hypothesis.evidence_ids)
-    if not evidence_ids:
-        return ActionResult(
-            action=ActionType.REQUEST_WARRANT,
-            outcome=ActionOutcome.FAILURE,
-            summary="Select supporting evidence before requesting a warrant.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    _mark_style(state, "analytical")
-    plan = OperationPlan(
+    request = OperationRequest(
         op_type=OperationType.WARRANT,
+        location_id=location_id,
+        evidence_ids=tuple(evidence_ids or ()),
         warrant_type=warrant_type,
-        target_person_id=board.hypothesis.suspect_id,
-        target_location_id=location_id,
-        evidence_ids=list(evidence_ids),
     )
-    outcome = resolve_operation(plan, presentation, board.hypothesis)
-    apply_action(
-        truth,
-        EventKind.REQUEST_WARRANT,
-        state.time,
-        location_id,
-        participants=[board.hypothesis.suspect_id],
-        metadata={"action": "request_warrant", "warrant_type": warrant_type.value},
+    result, _ = run_operation(
+        request,
+        OperationContext(truth, presentation, state, board, world),
     )
-    notes = update_lead_statuses(state)
-    notes.extend(outcome.notes)
-    _apply_operation_outcome(state, outcome, notes, "warrant decision")
-    action_outcome = (
-        ActionOutcome.SUCCESS
-        if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}
-        else ActionOutcome.FAILURE
-    )
-    if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}:
-        state.warrant_grants.add(warrant_type.value)
-    return ActionResult(
-        action=ActionType.REQUEST_WARRANT,
-        outcome=action_outcome,
-        summary=outcome.summary,
-        time_cost=time_cost,
-        pressure_cost=pressure_cost,
-        cooperation_change=coop_delta,
-        notes=notes,
-        operation_type=OperationType.WARRANT,
-        operation_tier=outcome.tier,
-    )
+    return result
 
 
 def stakeout(
@@ -1400,72 +1348,18 @@ def stakeout(
     board: DeductionBoard,
     location_id: UUID,
     evidence_ids: list[UUID],
+    world=None,
 ) -> ActionResult:
-    if board.hypothesis is None:
-        return ActionResult(
-            action=ActionType.STAKEOUT,
-            outcome=ActionOutcome.FAILURE,
-            summary="Set a hypothesis before running a stakeout.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    if not evidence_ids:
-        return ActionResult(
-            action=ActionType.STAKEOUT,
-            outcome=ActionOutcome.FAILURE,
-            summary="Select supporting evidence before running a stakeout.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
-        state, ActionType.STAKEOUT
-    )
-    if blocked:
-        return ActionResult(
-            action=ActionType.STAKEOUT,
-            outcome=ActionOutcome.FAILURE,
-            summary=reason,
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    _mark_style(state, "analytical")
-    plan = OperationPlan(
+    request = OperationRequest(
         op_type=OperationType.STAKEOUT,
-        target_person_id=board.hypothesis.suspect_id,
-        target_location_id=location_id,
-        evidence_ids=list(evidence_ids),
+        location_id=location_id,
+        evidence_ids=tuple(evidence_ids or ()),
     )
-    outcome = resolve_operation(plan, presentation, board.hypothesis)
-    apply_action(
-        truth,
-        EventKind.STAKEOUT,
-        state.time,
-        location_id,
-        participants=[board.hypothesis.suspect_id],
-        metadata={"action": "stakeout"},
+    result, _ = run_operation(
+        request,
+        OperationContext(truth, presentation, state, board, world),
     )
-    notes = update_lead_statuses(state)
-    notes.extend(outcome.notes)
-    _apply_operation_outcome(state, outcome, notes, "stakeout")
-    action_outcome = (
-        ActionOutcome.SUCCESS
-        if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}
-        else ActionOutcome.FAILURE
-    )
-    return ActionResult(
-        action=ActionType.STAKEOUT,
-        outcome=action_outcome,
-        summary=outcome.summary,
-        time_cost=time_cost,
-        pressure_cost=pressure_cost,
-        cooperation_change=coop_delta,
-        notes=notes,
-        operation_type=OperationType.STAKEOUT,
-        operation_tier=outcome.tier,
-    )
+    return result
 
 
 def bait(
@@ -1475,72 +1369,18 @@ def bait(
     board: DeductionBoard,
     location_id: UUID,
     evidence_ids: list[UUID],
+    world=None,
 ) -> ActionResult:
-    if board.hypothesis is None:
-        return ActionResult(
-            action=ActionType.BAIT,
-            outcome=ActionOutcome.FAILURE,
-            summary="Set a hypothesis before running a bait operation.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    if not evidence_ids:
-        return ActionResult(
-            action=ActionType.BAIT,
-            outcome=ActionOutcome.FAILURE,
-            summary="Select supporting evidence before running bait.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
-        state, ActionType.BAIT
-    )
-    if blocked:
-        return ActionResult(
-            action=ActionType.BAIT,
-            outcome=ActionOutcome.FAILURE,
-            summary=reason,
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    _mark_style(state, "coercive")
-    plan = OperationPlan(
+    request = OperationRequest(
         op_type=OperationType.BAIT,
-        target_person_id=board.hypothesis.suspect_id,
-        target_location_id=location_id,
-        evidence_ids=list(evidence_ids),
+        location_id=location_id,
+        evidence_ids=tuple(evidence_ids or ()),
     )
-    outcome = resolve_operation(plan, presentation, board.hypothesis)
-    apply_action(
-        truth,
-        EventKind.BAIT,
-        state.time,
-        location_id,
-        participants=[board.hypothesis.suspect_id],
-        metadata={"action": "bait"},
+    result, _ = run_operation(
+        request,
+        OperationContext(truth, presentation, state, board, world),
     )
-    notes = update_lead_statuses(state)
-    notes.extend(outcome.notes)
-    _apply_operation_outcome(state, outcome, notes, "bait operation")
-    action_outcome = (
-        ActionOutcome.SUCCESS
-        if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}
-        else ActionOutcome.FAILURE
-    )
-    return ActionResult(
-        action=ActionType.BAIT,
-        outcome=action_outcome,
-        summary=outcome.summary,
-        time_cost=time_cost,
-        pressure_cost=pressure_cost,
-        cooperation_change=coop_delta,
-        notes=notes,
-        operation_type=OperationType.BAIT,
-        operation_tier=outcome.tier,
-    )
+    return result
 
 
 def raid(
@@ -1550,84 +1390,18 @@ def raid(
     board: DeductionBoard,
     location_id: UUID,
     evidence_ids: list[UUID],
+    world=None,
 ) -> ActionResult:
-    if board.hypothesis is None:
-        return ActionResult(
-            action=ActionType.RAID,
-            outcome=ActionOutcome.FAILURE,
-            summary="Set a hypothesis before running a raid.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    if not (
-        WarrantType.ARREST.value in state.warrant_grants
-        or WarrantType.SEARCH.value in state.warrant_grants
-    ):
-        return ActionResult(
-            action=ActionType.RAID,
-            outcome=ActionOutcome.FAILURE,
-            summary="Raid requires an arrest or search warrant.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    if not evidence_ids:
-        return ActionResult(
-            action=ActionType.RAID,
-            outcome=ActionOutcome.FAILURE,
-            summary="Select supporting evidence before running a raid.",
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    blocked, reason, time_cost, pressure_cost, coop_delta = _apply_cost(
-        state, ActionType.RAID
-    )
-    if blocked:
-        return ActionResult(
-            action=ActionType.RAID,
-            outcome=ActionOutcome.FAILURE,
-            summary=reason,
-            time_cost=0,
-            pressure_cost=0,
-            cooperation_change=0.0,
-        )
-    _mark_style(state, "coercive")
-    plan = OperationPlan(
+    request = OperationRequest(
         op_type=OperationType.RAID,
-        target_person_id=board.hypothesis.suspect_id,
-        target_location_id=location_id,
-        evidence_ids=list(evidence_ids),
+        location_id=location_id,
+        evidence_ids=tuple(evidence_ids or ()),
     )
-    outcome = resolve_operation(plan, presentation, board.hypothesis)
-    apply_action(
-        truth,
-        EventKind.RAID,
-        state.time,
-        location_id,
-        participants=[board.hypothesis.suspect_id],
-        metadata={"action": "raid"},
+    result, _ = run_operation(
+        request,
+        OperationContext(truth, presentation, state, board, world),
     )
-    notes = update_lead_statuses(state)
-    notes.extend(outcome.notes)
-    _apply_operation_outcome(state, outcome, notes, "raid")
-    action_outcome = (
-        ActionOutcome.SUCCESS
-        if outcome.tier in {OperationTier.CLEAN, OperationTier.PARTIAL}
-        else ActionOutcome.FAILURE
-    )
-    return ActionResult(
-        action=ActionType.RAID,
-        outcome=action_outcome,
-        summary=outcome.summary,
-        time_cost=time_cost,
-        pressure_cost=pressure_cost,
-        cooperation_change=coop_delta,
-        notes=notes,
-        operation_type=OperationType.RAID,
-        operation_tier=outcome.tier,
-    )
+    return result
 
 
 def arrest(
